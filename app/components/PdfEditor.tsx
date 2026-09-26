@@ -51,7 +51,6 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         setNearViewport(entry.isIntersecting);
-        if (entry.isIntersecting && entry.intersectionRatio > 0.55) onActivate(pageNumber);
       });
     }, { root, rootMargin: '900px 0px', threshold: [0, 0.55, 1] });
     observer.observe(shell);
@@ -237,6 +236,37 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   }, [markup, fileId, saveMarkup]);
 
   const setActivePage = useCallback((nextPage: number) => setPageNumber(nextPage), []);
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || !document) return;
+    let frame = 0;
+    const updatePage = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rootBounds = root.getBoundingClientRect();
+        const centerY = rootBounds.top + rootBounds.height / 2;
+        let closestPage = 1;
+        let closestDistance = Number.POSITIVE_INFINITY;
+        root.querySelectorAll<HTMLElement>('.pdf-page-shell[id^="pdf-page-"]').forEach((page) => {
+          const bounds = page.getBoundingClientRect();
+          const distance = centerY < bounds.top ? bounds.top - centerY : centerY > bounds.bottom ? centerY - bounds.bottom : 0;
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestPage = Number(page.id.slice('pdf-page-'.length));
+          }
+        });
+        if (closestPage >= 1 && closestPage <= pageSizes.length) setPageNumber(closestPage);
+      });
+    };
+    root.addEventListener('scroll', updatePage, { passive: true });
+    window.addEventListener('resize', updatePage);
+    updatePage();
+    return () => {
+      cancelAnimationFrame(frame);
+      root.removeEventListener('scroll', updatePage);
+      window.removeEventListener('resize', updatePage);
+    };
+  }, [document, pageSizes.length]);
   const pointDistance = (left: [number, number], right: [number, number]) => Math.hypot(left[0] - right[0], left[1] - right[1]);
   const drawPoint = (targetPage: number, point: [number, number], begin: boolean) => {
     setMarkup((current) => {
