@@ -35,6 +35,7 @@ type PageProps = {
 
 const blankMarkup = (): PdfMarkup => ({ notes: {}, strokes: {} });
 const INK_COLORS = ['#202820', '#d94f46', '#3367c7', '#e09b23', '#7b4bb5'];
+const HIGHLIGHTER_COLORS = ['#ffe45e', '#ff78a8', '#62b7ff', '#70d99a'];
 
 function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
   const shellRef = useRef<HTMLDivElement>(null);
@@ -173,6 +174,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [markup, setMarkup] = useState<PdfMarkup>(blankMarkup);
   const [pageNumber, setPageNumber] = useState(1);
   const [penColor, setPenColor] = useState(INK_COLORS[0]);
+  const [highlighterColor, setHighlighterColor] = useState(HIGHLIGHTER_COLORS[0]);
   const [penSize, setPenSize] = useState(0.004);
   const [tool, setTool] = useState<Tool>('pen');
   const [viewMode, setViewMode] = useState<ViewMode>('viewer');
@@ -275,7 +277,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const drawPoint = (targetPage: number, point: [number, number], begin: boolean) => {
     setMarkup((current) => {
       const pageStrokes = [...(current.strokes[targetPage] || [])];
-      if (begin) pageStrokes.push({ color: tool === 'highlighter' ? '#ffe45e' : penColor, size: tool === 'highlighter' ? 0.022 : penSize, opacity: tool === 'highlighter' ? 0.34 : 1, points: [point] });
+      if (begin) pageStrokes.push({ color: tool === 'highlighter' ? highlighterColor : penColor, size: tool === 'highlighter' ? 0.022 : penSize, opacity: tool === 'highlighter' ? 0.34 : 1, points: [point] });
       else if (pageStrokes.length) {
         const last = pageStrokes[pageStrokes.length - 1];
         pageStrokes[pageStrokes.length - 1] = { ...last, points: [...last.points, point] };
@@ -392,7 +394,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       <header className="pdf-editor-header"><div className="pdf-title"><strong title={file.name}>{file.name}</strong><span className={`autosave-status ${saveLabel.includes('실패') ? 'save-error' : ''}`}><i />{saveLabel}</span></div><button className="pdf-close" onClick={() => void closeEditor()} aria-label="편집 닫기">×</button></header>
       <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
         <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
-        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label="펜 색상">{INK_COLORS.map((color) => <button key={color} aria-label={`펜 색상 ${color}`} aria-pressed={penColor === color} className={penColor === color ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { setPenColor(color); setTool('pen'); }} />)}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
+        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label={tool === 'highlighter' ? '형광펜 색상' : '펜 색상'}>{(tool === 'highlighter' ? HIGHLIGHTER_COLORS : INK_COLORS).map((color) => { const selected = tool === 'highlighter' ? highlighterColor === color : penColor === color; return <button key={color} aria-label={`${tool === 'highlighter' ? '형광펜' : '펜'} 색상 ${color}`} aria-pressed={selected} className={selected ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { if (tool === 'highlighter') { setHighlighterColor(color); setTool('highlighter'); } else { setPenColor(color); setTool('pen'); } }} />; })}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
         <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
       </div>
       <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
