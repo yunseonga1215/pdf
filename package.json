@@ -3,19 +3,26 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
     "next": "15.5.9",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "devDependencies": {
-    "typescript": "^5.9.3",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3"
   }
 }

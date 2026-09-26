@@ -1,8 +1,12 @@
 'use client';
 
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import type { PdfMarkup } from './components/PdfEditor';
 
-type Folder = { id: string; name: string; createdAt: number };
+const PdfEditor = dynamic(() => import('./components/PdfEditor'), { ssr: false });
+
+type Folder = { id: string; name: string; createdAt: number; color?: string };
 type LibraryFile = { id: string; folderId: string; file: File; savedAt: number };
 type DestinationMode = 'existing' | 'new';
 
@@ -10,6 +14,7 @@ const DB_NAME = 'dama-file-library';
 const DB_VERSION = 2;
 const FOLDERS = 'folders';
 const FILES = 'files';
+const MARKUP_PREFIX = '__pdf_markup__:';
 
 function openLibrary(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -38,6 +43,27 @@ function openLibrary(): Promise<IDBDatabase> {
   });
 }
 
+function loadPdfMarkup(fileId: string): Promise<PdfMarkup> {
+  return openLibrary().then((db) => new Promise((resolve, reject) => {
+    const transaction = db.transaction(FOLDERS, 'readonly');
+    const request = transaction.objectStore(FOLDERS).get(`${MARKUP_PREFIX}${fileId}`);
+    request.onsuccess = () => resolve(request.result?.markup || { notes: {}, strokes: {} });
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => { db.close(); reject(transaction.error); };
+  }));
+}
+
+function savePdfMarkup(fileId: string, markup: PdfMarkup): Promise<void> {
+  return openLibrary().then((db) => new Promise((resolve, reject) => {
+    const transaction = db.transaction(FOLDERS, 'readwrite');
+    transaction.objectStore(FOLDERS).put({ id: `${MARKUP_PREFIX}${fileId}`, markup, updatedAt: Date.now() });
+    transaction.oncomplete = () => { db.close(); resolve(); };
+    transaction.onerror = () => { db.close(); reject(transaction.error); };
+    transaction.onabort = () => { db.close(); reject(transaction.error); };
+  }));
+}
+
 function loadLibrary(): Promise<{ folders: Folder[]; files: LibraryFile[] }> {
   return openLibrary().then((db) => new Promise((resolve, reject) => {
     const transaction = db.transaction([FOLDERS, FILES], 'readonly');
@@ -45,7 +71,7 @@ function loadLibrary(): Promise<{ folders: Folder[]; files: LibraryFile[] }> {
     const fileRequest = transaction.objectStore(FILES).getAll();
     transaction.oncomplete = () => {
       resolve({
-        folders: (folderRequest.result as Folder[]).sort((a, b) => b.createdAt - a.createdAt),
+        folders: (folderRequest.result as Folder[]).filter((folder) => !folder.id.startsWith(MARKUP_PREFIX)).sort((a, b) => b.createdAt - a.createdAt),
         files: (fileRequest.result as LibraryFile[]).sort((a, b) => b.savedAt - a.savedAt),
       });
       db.close();
@@ -81,8 +107,13 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState('');
   const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [pdfEditingFile, setPdfEditingFile] = useState<{ id: string; file: File } | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewText, setPreviewText] = useState('');
+  const [openFolderMenu, setOpenFolderMenu] = useState('');
+  const [renameFolder, setRenameFolder] = useState<Folder | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeFolder = folders.find((folder) => folder.id === activeFolderId);
@@ -214,20 +245,23 @@ export default function Home() {
 
   const deleteFile = async (id: string) => {
     const db = await openLibrary();
-    const transaction = db.transaction(FILES, 'readwrite');
+    const transaction = db.transaction([FILES, FOLDERS], 'readwrite');
     transaction.objectStore(FILES).delete(id);
+    transaction.objectStore(FOLDERS).delete(`${MARKUP_PREFIX}${id}`);
     transaction.oncomplete = () => { db.close(); void refreshLibrary(activeFolderId); };
     transaction.onerror = () => { db.close(); setMessage('파일을 삭제하지 못했어요.'); };
   };
 
   const deleteFolder = async (folder: Folder) => {
-    if (!window.confirm(`'${folder.name}' 폴더와 안의 파일을 모두 삭제할까요?`)) return;
     const db = await openLibrary();
     const transaction = db.transaction([FOLDERS, FILES], 'readwrite');
     const fileStore = transaction.objectStore(FILES);
     const request = fileStore.getAll();
     request.onsuccess = () => {
-      (request.result as LibraryFile[]).filter((file) => file.folderId === folder.id).forEach((file) => fileStore.delete(file.id));
+      (request.result as LibraryFile[]).filter((file) => file.folderId === folder.id).forEach((file) => {
+        fileStore.delete(file.id);
+        transaction.objectStore(FOLDERS).delete(`${MARKUP_PREFIX}${file.id}`);
+      });
       transaction.objectStore(FOLDERS).delete(folder.id);
     };
     transaction.oncomplete = () => { db.close(); void refreshLibrary(); };
@@ -235,6 +269,35 @@ export default function Home() {
   };
 
   const openFile = (file: File) => setPreviewFile(file);
+
+  const handleOpenFile = (id: string, file: File) => {
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      setPdfEditingFile({ id, file });
+      return;
+    }
+    openFile(file);
+  };
+
+  const updateFolder = async (folderId: string, update: Partial<Folder>) => {
+    const db = await openLibrary();
+    const transaction = db.transaction(FOLDERS, 'readwrite');
+    const store = transaction.objectStore(FOLDERS);
+    const request = store.get(folderId);
+    request.onsuccess = () => { if (request.result) store.put({ ...request.result, ...update }); };
+    transaction.oncomplete = () => { db.close(); setOpenFolderMenu(''); void refreshLibrary(activeFolderId); };
+    transaction.onerror = () => { db.close(); setMessage('폴더를 변경하지 못했어요.'); };
+  };
+
+  const confirmRenameFolder = async () => {
+    const name = renameValue.trim();
+    if (!renameFolder || !name) return;
+    if (folders.some((folder) => folder.id !== renameFolder.id && folder.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      setMessage('같은 이름의 폴더가 있어요. 다른 이름을 입력해 주세요.');
+      return;
+    }
+    await updateFolder(renameFolder.id, { name });
+    setRenameFolder(null);
+  };
 
   const downloadPreviewFile = () => {
     if (!previewFile || !previewUrl) return;
@@ -292,18 +355,18 @@ export default function Home() {
         <div className="section-heading"><div><h2>내 폴더</h2><span>{folders.length}개</span></div><button className="new-folder-button" onClick={startCreateFolder}><span>＋</span> 새 폴더</button></div>
         {folders.length ? <div className="folder-grid">{folders.map((folder) => {
           const stats = folderCounts.get(folder.id) || { count: 0, size: 0 };
-          return <div className={`folder-card ${activeFolderId === folder.id ? 'selected' : ''}`} key={folder.id}>
+          return <div className={`folder-card ${activeFolderId === folder.id ? 'selected' : ''}`} key={folder.id} style={{ '--folder-tint': folder.color || '#819176' } as React.CSSProperties}>
             <button className="folder-card-main" onClick={() => setActiveFolderId(folder.id)} aria-pressed={activeFolderId === folder.id}>
               <span className="folder-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.8A1.8 1.8 0 0 1 5.3 5h4l1.9 2h7.5a1.8 1.8 0 0 1 1.8 1.8v9.4a1.8 1.8 0 0 1-1.8 1.8H5.3a1.8 1.8 0 0 1-1.8-1.8z"/><path d="M3.8 9.1h16.4"/></svg></span>
               <span className="folder-card-name" title={folder.name}>{folder.name}</span>
               <span className="folder-card-meta">{stats.count}개 파일 · {formatSize(stats.size)}</span>
-            </button><button className="folder-delete" aria-label={`${folder.name} 폴더 삭제`} onClick={() => void deleteFolder(folder)}>···</button>
+            </button><div className="folder-menu-wrap"><button className="folder-delete" aria-label={`${folder.name} 폴더 옵션`} aria-expanded={openFolderMenu === folder.id || openFolderMenu === `color:${folder.id}`} onClick={() => setOpenFolderMenu((current) => current === folder.id || current === `color:${folder.id}` ? '' : folder.id)}>···</button>{(openFolderMenu === folder.id || openFolderMenu === `color:${folder.id}`) && <div className="folder-menu"><button onClick={() => { setRenameFolder(folder); setRenameValue(folder.name); setOpenFolderMenu(''); }}>이름 변경</button><button onClick={() => setOpenFolderMenu(`color:${folder.id}`)}>색깔 변경 <span style={{ color: folder.color || '#819176' }}>●</span></button>{openFolderMenu === `color:${folder.id}` && <div className="folder-color-menu">{['#819176','#d18a58','#6489b3','#aa789e','#d0a83f','#77808e'].map((color) => <button key={color} aria-label={`폴더 색상 ${color}`} style={{ background: color }} onClick={() => void updateFolder(folder.id, { color })} />)}</div>}<button className="danger-menu-item" onClick={() => { setFolderToDelete(folder); setOpenFolderMenu(''); }}>모두 삭제</button></div>}</div>
           </div>;
         })}</div> : <div className="empty-folders"><span className="empty-folder-icon">▱</span><strong>아직 폴더가 없어요</strong><span>파일을 추가하고 새 폴더 이름을 입력하거나<br />위의 ‘새 폴더’ 버튼으로 먼저 만들어 보세요.</span></div>}
 
         {activeFolder && <div className="library-section">
           <div className="file-section-head"><div><h2>{activeFolder.name}</h2><span>{visibleFiles.length}개 파일 · {formatSize(visibleFiles.reduce((sum, item) => sum + item.file.size, 0))}</span></div><button className="add-more-button" onClick={() => inputRef.current?.click()}>＋ 파일 추가</button></div>
-          {visibleFiles.length ? <ul className="file-list">{visibleFiles.map(({ id, file }) => <li className="file-item" key={id}><FileGlyph name={file.name} /><div className="file-meta"><strong title={file.name}>{file.name}</strong><span>{formatSize(file.size)}</span></div><button className="open-file-button" onClick={() => openFile(file)}>열기</button><button className="remove-button" aria-label={`${file.name} 삭제`} onClick={() => void deleteFile(id)}>×</button></li>)}</ul> : <div className="empty-files">이 폴더는 비어 있어요. 파일을 추가해 보세요.</div>}
+          {visibleFiles.length ? <ul className="file-list">{visibleFiles.map(({ id, file }) => <li className="file-item" key={id}><FileGlyph name={file.name} /><div className="file-meta"><strong title={file.name}>{file.name}</strong><span>{formatSize(file.size)}</span></div><button className="open-file-button" onClick={() => handleOpenFile(id, file)}>{file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf') ? '편집' : '열기'}</button><button className="remove-button" aria-label={`${file.name} 삭제`} onClick={() => void deleteFile(id)}>×</button></li>)}</ul> : <div className="empty-files">이 폴더는 비어 있어요. 파일을 추가해 보세요.</div>}
         </div>}
 
         {message && <p className="message-note" role="status">{message}<button onClick={() => setMessage('')} aria-label="안내 닫기">×</button></p>}
@@ -343,6 +406,12 @@ export default function Home() {
           <footer className="preview-footer"><span>파일은 이 기기의 브라우저에 보관돼요.</span><div><button className="cancel-button" onClick={() => void sharePreviewFile()}>기기에서 열기</button><button className="confirm-button preview-download" onClick={downloadPreviewFile}>다운로드</button></div></footer>
         </section>
       </div>}
+
+      {renameFolder && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setRenameFolder(null); }}><section className="destination-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><button className="dialog-close" onClick={() => setRenameFolder(null)} aria-label="닫기">×</button><span className="dialog-kicker">FOLDER</span><h2 id="rename-title">폴더 이름 변경</h2><label className="folder-name-field"><span>폴더 이름</span><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} maxLength={60} onKeyDown={(event) => { if (event.key === 'Enter') void confirmRenameFolder(); }} /></label><div className="dialog-actions"><button className="cancel-button" onClick={() => setRenameFolder(null)}>취소</button><button className="confirm-button" onClick={() => void confirmRenameFolder()}>이름 저장</button></div></section></div>}
+
+      {folderToDelete && <div className="dialog-backdrop" role="presentation"><section className="destination-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-folder-title"><span className="dialog-kicker">DELETE FOLDER</span><h2 id="delete-folder-title">‘{folderToDelete.name}’ 폴더를 모두 삭제할까요?</h2><p className="delete-folder-copy">폴더 안의 파일과 필기도 함께 지워집니다. 이 작업은 되돌릴 수 없어요.</p><div className="dialog-actions"><button className="cancel-button" onClick={() => setFolderToDelete(null)}>취소</button><button className="confirm-button danger-confirm" onClick={() => { const target = folderToDelete; setFolderToDelete(null); void deleteFolder(target); }}>폴더와 파일 삭제</button></div></section></div>}
+
+      {pdfEditingFile && <PdfEditor file={pdfEditingFile.file} fileId={pdfEditingFile.id} loadMarkup={loadPdfMarkup} saveMarkup={savePdfMarkup} onClose={() => setPdfEditingFile(null)} />}
     </main>
   );
 }
