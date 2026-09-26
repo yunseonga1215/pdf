@@ -333,7 +333,7 @@ export default function Home() {
   return (
     <main className="page-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="담아 홈"><span className="brand-mark"><i /><i /><i /></span><span>담아</span></a>
+        <a className="brand" href="#top" aria-label="Note 홈"><span className="brand-mark"><i /><i /><i /></span><span>Note</span></a>
         <div className="topbar-note"><span className="secure-dot" /> 파일은 이 기기에만 저장돼요</div>
       </header>
 
@@ -374,7 +374,7 @@ export default function Home() {
         <p className="privacy-note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.7 13 3.5v3.7c0 3.2-2 5.7-5 7.1-3-1.4-5-3.9-5-7.1V3.5z"/><path d="m5.8 7.6 1.5 1.5 3-3.1"/></svg>파일과 폴더는 이 기기의 브라우저에 보관돼요. 외부로 전송되지 않아요.</p>
       </section>
 
-      <footer className="footer"><span>필요한 만큼 담고, 원하는 폴더에 보관하세요.</span><span>담아 <b>·</b> 내 파일은 내 곁에</span></footer>
+      <footer className="footer"><span>필요한 만큼 담고, 원하는 폴더에 보관하세요.</span><span>Note <b>·</b> 내 파일은 내 곁에</span></footer>
 
       {dialogOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setDialogOpen(false); }}>
         <section className="destination-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">

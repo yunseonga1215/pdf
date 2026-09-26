@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '폴더에 담기 — 내 파일, 내 폴더에',
+  title: 'Note — 내 파일, 내 폴더에',
   description: '파일을 업로드하고 내가 선택한 폴더에 안전하게 저장하세요.',
 };
 
