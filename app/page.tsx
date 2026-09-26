@@ -80,6 +80,9 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState('');
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewText, setPreviewText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeFolder = folders.find((folder) => folder.id === activeFolderId);
@@ -108,6 +111,20 @@ export default function Home() {
     refreshLibrary().catch(() => setMessage('브라우저 보관함을 열지 못했어요. 브라우저의 저장 공간을 확인해 주세요.'))
       .finally(() => setReady(true));
   }, [refreshLibrary]);
+
+  useEffect(() => {
+    if (!previewFile) {
+      setPreviewUrl('');
+      setPreviewText('');
+      return;
+    }
+    const url = URL.createObjectURL(previewFile);
+    setPreviewUrl(url);
+    const extension = previewFile.name.split('.').pop()?.toLowerCase();
+    const isText = previewFile.type.startsWith('text/') || ['txt', 'md', 'csv', 'json', 'log', 'xml'].includes(extension || '');
+    if (isText) previewFile.text().then(setPreviewText).catch(() => setPreviewText('텍스트 미리보기를 불러오지 못했어요.'));
+    return () => URL.revokeObjectURL(url);
+  }, [previewFile]);
 
   const showDestinationDialog = (files: File[]) => {
     if (!files.length) return;
@@ -217,11 +234,38 @@ export default function Home() {
     transaction.onerror = () => { db.close(); setMessage('폴더를 삭제하지 못했어요.'); };
   };
 
-  const openFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    window.open(url, '_blank', 'noopener,noreferrer');
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const openFile = (file: File) => setPreviewFile(file);
+
+  const downloadPreviewFile = () => {
+    if (!previewFile || !previewUrl) return;
+    const anchor = document.createElement('a');
+    anchor.href = previewUrl;
+    anchor.download = previewFile.name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   };
+
+  const sharePreviewFile = async () => {
+    if (!previewFile || !navigator.share || !navigator.canShare?.({ files: [previewFile] })) {
+      downloadPreviewFile();
+      return;
+    }
+    try {
+      await navigator.share({ files: [previewFile], title: previewFile.name });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      downloadPreviewFile();
+    }
+  };
+
+  const previewExtension = previewFile?.name.split('.').pop()?.toLowerCase();
+  const previewType = previewFile?.type || '';
+  const isImagePreview = !!previewFile && (previewType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(previewExtension || ''));
+  const isPdfPreview = !!previewFile && (previewType === 'application/pdf' || previewExtension === 'pdf');
+  const isVideoPreview = !!previewFile && previewType.startsWith('video/');
+  const isAudioPreview = !!previewFile && previewType.startsWith('audio/');
+  const isTextPreview = !!previewFile && (previewType.startsWith('text/') || ['txt', 'md', 'csv', 'json', 'log', 'xml'].includes(previewExtension || ''));
 
   return (
     <main className="page-shell">
@@ -282,6 +326,21 @@ export default function Home() {
           {!creatingFolderOnly && <label className={`destination-choice ${destinationMode === 'new' ? 'active' : ''}`}><input type="radio" name="destination" checked={destinationMode === 'new'} onChange={() => setDestinationMode('new')} /><span><strong>새 폴더 만들기</strong><small>새 폴더를 만들고 파일을 담아요.</small></span></label>}
           {(creatingFolderOnly || destinationMode === 'new') && <label className="folder-name-field"><span>폴더 이름</span><input autoFocus value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="예: 여행 사진" maxLength={60} onKeyDown={(event) => { if (event.key === 'Enter' && !busy) void saveIntoFolder(); }} /></label>}
           <div className="dialog-actions"><button className="cancel-button" onClick={() => setDialogOpen(false)} disabled={busy}>취소</button><button className="confirm-button" onClick={() => void saveIntoFolder()} disabled={busy || !ready}>{busy ? <><span className="spinner" /> 저장 중...</> : creatingFolderOnly ? '폴더 만들기' : destinationMode === 'new' ? '폴더 만들고 저장' : '선택한 폴더에 저장'}</button></div>
+        </section>
+      </div>}
+
+      {previewFile && <div className="preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewFile(null); }}>
+        <section className="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+          <header className="preview-header"><div><h2 id="preview-title" title={previewFile.name}>{previewFile.name}</h2><span>{formatSize(previewFile.size)}</span></div><button className="dialog-close" onClick={() => setPreviewFile(null)} aria-label="미리보기 닫기">×</button></header>
+          <div className="preview-content">
+            {isImagePreview && <img src={previewUrl} alt={previewFile.name} />}
+            {isPdfPreview && <iframe src={previewUrl} title={`${previewFile.name} 미리보기`} />}
+            {isVideoPreview && <video src={previewUrl} controls playsInline />}
+            {isAudioPreview && <audio src={previewUrl} controls />}
+            {isTextPreview && <pre>{previewText || '미리보기를 불러오는 중...'}</pre>}
+            {!isImagePreview && !isPdfPreview && !isVideoPreview && !isAudioPreview && !isTextPreview && <div className="unsupported-preview"><FileGlyph name={previewFile.name} /><strong>이 파일 형식은 브라우저에서 미리 볼 수 없어요.</strong><span>파일을 기기에 내려받아 지원하는 앱에서 열어 주세요.</span></div>}
+          </div>
+          <footer className="preview-footer"><span>파일은 이 기기의 브라우저에 보관돼요.</span><div><button className="cancel-button" onClick={() => void sharePreviewFile()}>기기에서 열기</button><button className="confirm-button preview-download" onClick={downloadPreviewFile}>다운로드</button></div></footer>
         </section>
       </div>}
     </main>
