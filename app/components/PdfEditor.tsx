@@ -3,10 +3,10 @@
 import { PointerEvent, RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
-export type InkStroke = { color: string; size: number; points: Array<[number, number]> };
+export type InkStroke = { color: string; size: number; opacity?: number; points: Array<[number, number]> };
 export type PdfMarkup = { notes: Record<number, string>; strokes: Record<number, InkStroke[]> };
 type PageSize = { width: number; height: number };
-type Tool = 'pen' | 'eraser';
+type Tool = 'pen' | 'eraser' | 'highlighter';
 type ViewMode = 'viewer' | 'write';
 
 type EditorProps = {
@@ -95,6 +95,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
       pageStrokes.forEach((stroke) => {
         if (!stroke.points.length) return;
         context.beginPath();
+        context.globalAlpha = stroke.opacity ?? 1;
         context.strokeStyle = stroke.color;
         context.fillStyle = stroke.color;
         context.lineWidth = Math.max(stroke.size * canvas.width, 2);
@@ -104,6 +105,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
         if (stroke.points.length === 1) context.lineTo(x * canvas.width + 0.01, y * canvas.height + 0.01);
         context.stroke();
       });
+      context.globalAlpha = 1;
     };
     void render();
     return () => {
@@ -125,6 +127,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
     strokes.forEach((stroke) => {
       if (!stroke.points.length) return;
       context.beginPath();
+      context.globalAlpha = stroke.opacity ?? 1;
       context.strokeStyle = stroke.color;
       context.lineWidth = Math.max(stroke.size * canvas.width, 2);
       const [x, y] = stroke.points[0];
@@ -133,6 +136,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
       if (stroke.points.length === 1) context.lineTo(x * canvas.width + 0.01, y * canvas.height + 0.01);
       context.stroke();
     });
+    context.globalAlpha = 1;
   }, [strokes, nearViewport]);
 
   const pointFor = (event: PointerEvent<HTMLCanvasElement>): [number, number] => {
@@ -271,7 +275,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const drawPoint = (targetPage: number, point: [number, number], begin: boolean) => {
     setMarkup((current) => {
       const pageStrokes = [...(current.strokes[targetPage] || [])];
-      if (begin) pageStrokes.push({ color: penColor, size: penSize, points: [point] });
+      if (begin) pageStrokes.push({ color: tool === 'highlighter' ? '#ffe45e' : penColor, size: tool === 'highlighter' ? 0.022 : penSize, opacity: tool === 'highlighter' ? 0.34 : 1, points: [point] });
       else if (pageStrokes.length) {
         const last = pageStrokes[pageStrokes.length - 1];
         pageStrokes[pageStrokes.length - 1] = { ...last, points: [...last.points, point] };
@@ -317,12 +321,12 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
           const thickness = Math.max(stroke.size * pageWidth, 1.2);
           if (stroke.points.length === 1) {
             const [x, y] = stroke.points[0];
-            page.drawCircle({ x: x * pageWidth, y: (1 - y) * pageHeight, size: thickness / 2, color });
+            page.drawCircle({ x: x * pageWidth, y: (1 - y) * pageHeight, size: thickness / 2, color, opacity: stroke.opacity ?? 1 });
           }
           for (let i = 1; i < stroke.points.length; i++) {
             const [x1, y1] = stroke.points[i - 1];
             const [x2, y2] = stroke.points[i];
-            page.drawLine({ start: { x: x1 * pageWidth, y: (1 - y1) * pageHeight }, end: { x: x2 * pageWidth, y: (1 - y2) * pageHeight }, thickness, color, opacity: 0.92 });
+            page.drawLine({ start: { x: x1 * pageWidth, y: (1 - y1) * pageHeight }, end: { x: x2 * pageWidth, y: (1 - y2) * pageHeight }, thickness, color, opacity: stroke.opacity ?? 0.92 });
           }
         }
         const note = markup.notes[index + 1]?.trim();
@@ -388,7 +392,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       <header className="pdf-editor-header"><div className="pdf-title"><strong title={file.name}>{file.name}</strong><span className={`autosave-status ${saveLabel.includes('실패') ? 'save-error' : ''}`}><i />{saveLabel}</span></div><button className="pdf-close" onClick={() => void closeEditor()} aria-label="편집 닫기">×</button></header>
       <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
         <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
-        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label="펜 색상">{INK_COLORS.map((color) => <button key={color} aria-label={`펜 색상 ${color}`} aria-pressed={penColor === color} className={penColor === color ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { setPenColor(color); setTool('pen'); }} />)}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
+        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label="펜 색상">{INK_COLORS.map((color) => <button key={color} aria-label={`펜 색상 ${color}`} aria-pressed={penColor === color} className={penColor === color ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { setPenColor(color); setTool('pen'); }} />)}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
         <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
       </div>
       <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
