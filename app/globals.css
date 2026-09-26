@@ -75,3 +75,4 @@ html[data-theme="dark"] .pdf-canvas-scroller,html[data-theme="dark"] .preview-co
 html[data-theme="dark"] .file-item{border-color:#3b413a}
 html[data-theme="dark"] .footer{color:#91998e}
 @media(max-width:600px){.topbar-actions{gap:7px}.theme-toggle{height:28px;padding:0 7px;font-size:9px}.topbar-note{font-size:9px}}
+@media(max-width:700px){.pdf-notes textarea,.folder-name-field input,.folder-select{font-size:16px;line-height:1.5}.pdf-notes textarea{padding:8px}}
