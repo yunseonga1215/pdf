@@ -287,19 +287,21 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   };
   const eraseAt = (targetPage: number, point: [number, number]) => {
     const radius = 0.018;
+    const pointSegmentDistance = (target: [number, number], start: [number, number], end: [number, number]) => {
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const lengthSquared = dx * dx + dy * dy;
+      if (!lengthSquared) return pointDistance(target, start);
+      const projection = Math.max(0, Math.min(1, ((target[0] - start[0]) * dx + (target[1] - start[1]) * dy) / lengthSquared));
+      return pointDistance(target, [start[0] + projection * dx, start[1] + projection * dy]);
+    };
     setMarkup((current) => {
-      const nextStrokes: InkStroke[] = [];
-      (current.strokes[targetPage] || []).forEach((stroke) => {
-        let segment: Array<[number, number]> = [];
-        const keepSegment = () => {
-          if (segment.length) nextStrokes.push({ ...stroke, points: segment });
-          segment = [];
-        };
-        stroke.points.forEach((strokePoint) => {
-          if (pointDistance(strokePoint, point) < radius) keepSegment();
-          else segment.push(strokePoint);
-        });
-        keepSegment();
+      const nextStrokes = (current.strokes[targetPage] || []).filter((stroke) => {
+        if (stroke.points.length === 1) return pointDistance(stroke.points[0], point) >= radius;
+        for (let index = 1; index < stroke.points.length; index++) {
+          if (pointSegmentDistance(point, stroke.points[index - 1], stroke.points[index]) < radius) return false;
+        }
+        return true;
       });
       return { ...current, strokes: { ...current.strokes, [targetPage]: nextStrokes } };
     });
