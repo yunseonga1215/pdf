@@ -36,3 +36,14 @@ button{font:inherit;cursor:pointer}
 @media(max-width:390px){.pdf-toolbar{padding-left:5px;padding-right:5px}.ink-tools{gap:3px}.ink-colors{gap:3px}.ink-colors button{width:13px;height:13px}.undo-button{padding:0 4px}.page-controls span{min-width:38px}.pdf-main{grid-template-rows:minmax(0,1fr) 138px}.pdf-notes{grid-template-columns:68px minmax(0,1fr);padding:7px}.notes-heading span{font-size:7px}}
 .pdf-page-list{width:100%;display:flex;flex-direction:column;align-items:center;gap:18px;padding-bottom:18px}.pdf-page-shell{overflow:hidden;flex:0 0 auto}.pdf-page-canvas{display:block}.ink-canvas{width:100%;height:100%;touch-action:none}.ink-canvas.eraser-enabled{cursor:cell}.pdf-canvas-scroller.screen-locked{overflow:hidden;overscroll-behavior:none;touch-action:pan-x}.screen-lock-button{margin-left:3px}
 @media(max-width:700px){.pdf-page-list{gap:12px;padding-bottom:12px}.screen-lock-button{margin-left:0}.screen-lock-button span:first-child{font-size:12px}}
+.ink-canvas.viewer-mode{pointer-events:none;touch-action:pan-y}
+.pdf-toolbar.write-mode-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;row-gap:6px;min-width:0}
+.mode-switch{display:flex;align-items:center;gap:3px;min-width:0}
+.mode-switch button{height:29px;padding:0 9px;border:1px solid #e3e6df;border-radius:5px;background:#fff;color:#71776d;font:500 10px 'Noto Sans KR',sans-serif;white-space:nowrap}
+.mode-switch button.mode-selected{border-color:#aebda4;background:#f0f4ed;color:#4f6845;font-weight:700}
+.page-indicator{align-self:center;white-space:nowrap;color:#777d73;font:500 10px 'DM Sans',sans-serif}
+.write-tools-scroll{grid-column:1/-1;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.write-tools-scroll::-webkit-scrollbar{display:none}
+.write-tools-scroll .ink-tools{width:max-content;min-width:100%;flex-wrap:nowrap;justify-content:flex-start}
+@media(max-width:700px){.pdf-toolbar.write-mode-toolbar{padding:6px 8px;row-gap:5px}.mode-switch button{height:28px;padding:0 8px;font-size:9px}.page-indicator{font-size:9px}.write-tools-scroll .tool-button{height:27px;padding:0 7px}.write-tools-scroll .ink-tools select{max-width:none}}
+@media(max-width:390px){.pdf-toolbar.write-mode-toolbar{padding-left:6px;padding-right:6px}.mode-switch button{padding:0 7px;font-size:8px}.write-tools-scroll .ink-tools{gap:5px}.write-tools-scroll .ink-colors button{width:15px;height:15px}}

@@ -7,6 +7,7 @@ export type InkStroke = { color: string; size: number; points: Array<[number, nu
 export type PdfMarkup = { notes: Record<number, string>; strokes: Record<number, InkStroke[]> };
 type PageSize = { width: number; height: number };
 type Tool = 'pen' | 'eraser';
+type ViewMode = 'viewer' | 'write';
 
 type EditorProps = {
   file: File;
@@ -25,6 +26,7 @@ type PageProps = {
   tool: Tool;
   penColor: string;
   penSize: number;
+  mode: ViewMode;
   scrollRoot: RefObject<HTMLDivElement | null>;
   onActivate: (pageNumber: number) => void;
   onDraw: (pageNumber: number, point: [number, number], begin: boolean) => void;
@@ -34,7 +36,7 @@ type PageProps = {
 const blankMarkup = (): PdfMarkup => ({ notes: {}, strokes: {} });
 const INK_COLORS = ['#202820', '#d94f46', '#3367c7', '#e09b23', '#7b4bb5'];
 
-function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
+function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const inkCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -139,6 +141,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
     return [Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))];
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (mode !== 'write') return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     onActivate(pageNumber);
@@ -147,6 +150,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
     else onDraw(pageNumber, point, true);
   };
   const pointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (mode !== 'write') return;
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
     event.preventDefault();
     const point = pointFor(event);
@@ -156,7 +160,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
 
   return <div id={`pdf-page-${pageNumber}`} ref={shellRef} className="pdf-page-shell" style={{ width, height }} onPointerDown={() => onActivate(pageNumber)}>
     <canvas ref={pdfCanvasRef} className="pdf-page-canvas" />
-    <canvas ref={inkCanvasRef} className={`ink-canvas ink-enabled ${tool === 'eraser' ? 'eraser-enabled' : ''}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
+    <canvas ref={inkCanvasRef} className={`ink-canvas ${mode === 'write' ? 'ink-enabled' : 'viewer-mode'} ${tool === 'eraser' && mode === 'write' ? 'eraser-enabled' : ''}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
   </div>;
 }
 
@@ -168,6 +172,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [penColor, setPenColor] = useState(INK_COLORS[0]);
   const [penSize, setPenSize] = useState(0.004);
   const [tool, setTool] = useState<Tool>('pen');
+  const [viewMode, setViewMode] = useState<ViewMode>('viewer');
   const [screenLocked, setScreenLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -263,12 +268,6 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
     });
   };
 
-  const goToPage = (targetPage: number) => {
-    const boundedPage = Math.max(1, Math.min(pageSizes.length, targetPage));
-    setPageNumber(boundedPage);
-    document?.getPage(boundedPage).then(() => window.document.getElementById(`pdf-page-${boundedPage}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  };
-
   const exportAnnotatedPdf = async () => {
     if (!document) return;
     setExporting(true);
@@ -356,17 +355,18 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   return <div className="pdf-editor-backdrop">
     <section className="pdf-editor" role="dialog" aria-modal="true" aria-label={`${file.name} PDF 편집`}>
       <header className="pdf-editor-header"><div className="pdf-title"><strong title={file.name}>{file.name}</strong><span className={`autosave-status ${saveLabel.includes('실패') ? 'save-error' : ''}`}><i />{saveLabel}</span></div><button className="pdf-close" onClick={() => void closeEditor()} aria-label="편집 닫기">×</button></header>
-      <div className="pdf-toolbar">
-        <div className="page-controls"><button onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1 || loading}>‹</button><span>{pageNumber} / {pageSizes.length || '—'}</span><button onClick={() => goToPage(pageNumber + 1)} disabled={pageNumber >= pageSizes.length || loading}>›</button></div>
-        <div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label="펜 색상">{INK_COLORS.map((color) => <button key={color} aria-label={`펜 색상 ${color}`} aria-pressed={penColor === color} className={penColor === color ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { setPenColor(color); setTool('pen'); }} />)}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div>
+      <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
+        <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
+        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label="펜 색상">{INK_COLORS.map((color) => <button key={color} aria-label={`펜 색상 ${color}`} aria-pressed={penColor === color} className={penColor === color ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { setPenColor(color); setTool('pen'); }} />)}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
+        <span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span>
       </div>
       <div className="pdf-main">
         <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''}`} ref={scrollRef}>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}
-          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={Math.min(pageWidth, pageWidth)} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />)}</div>}
+          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />)}</div>}
         </div>
-        <aside className="pdf-notes"><div className="notes-heading"><strong>페이지 메모</strong><span>{pageNumber}페이지 · 자동 저장</span></div><textarea value={currentNote} onChange={(event) => setMarkup((current) => ({ ...current, notes: { ...current.notes, [pageNumber]: event.target.value } }))} placeholder="이 페이지의 메모를 적어 보세요…" /><div className="notes-bottom"><span>{currentPageStrokes.length}개 필기 · {screenLocked ? '화면 고정됨' : '세로 스크롤 가능'}</span><button onClick={() => void exportAnnotatedPdf()} disabled={loading || exporting}>{exporting ? 'PDF 만드는 중…' : '필기 포함 PDF 저장'}</button></div></aside>
+        <aside className="pdf-notes"><div className="notes-heading"><strong>페이지별 메모</strong><span>{pageNumber}페이지 · 입력 즉시 자동 저장</span></div><textarea value={currentNote} onChange={(event) => setMarkup((current) => ({ ...current, notes: { ...current.notes, [pageNumber]: event.target.value } }))} placeholder="이 페이지의 메모를 적어 보세요…" /><div className="notes-bottom"><span>{currentPageStrokes.length}개 필기 · {screenLocked ? '화면 고정됨' : '세로 스크롤 가능'}</span><button onClick={() => void exportAnnotatedPdf()} disabled={loading || exporting}>{exporting ? 'PDF 만드는 중…' : '필기 포함 PDF 저장'}</button></div></aside>
       </div>
     </section>
   </div>;

@@ -366,7 +366,7 @@ export default function Home() {
 
         {activeFolder && <div className="library-section">
           <div className="file-section-head"><div><h2>{activeFolder.name}</h2><span>{visibleFiles.length}개 파일 · {formatSize(visibleFiles.reduce((sum, item) => sum + item.file.size, 0))}</span></div><button className="add-more-button" onClick={() => inputRef.current?.click()}>＋ 파일 추가</button></div>
-          {visibleFiles.length ? <ul className="file-list">{visibleFiles.map(({ id, file }) => <li className="file-item" key={id}><FileGlyph name={file.name} /><div className="file-meta"><strong title={file.name}>{file.name}</strong><span>{formatSize(file.size)}</span></div><button className="open-file-button" onClick={() => handleOpenFile(id, file)}>{file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf') ? '편집' : '열기'}</button><button className="remove-button" aria-label={`${file.name} 삭제`} onClick={() => void deleteFile(id)}>×</button></li>)}</ul> : <div className="empty-files">이 폴더는 비어 있어요. 파일을 추가해 보세요.</div>}
+          {visibleFiles.length ? <ul className="file-list">{visibleFiles.map(({ id, file }) => <li className="file-item" key={id}><FileGlyph name={file.name} /><div className="file-meta"><strong title={file.name}>{file.name}</strong><span>{formatSize(file.size)}</span></div><button className="open-file-button" onClick={() => handleOpenFile(id, file)}>열기</button><button className="remove-button" aria-label={`${file.name} 삭제`} onClick={() => void deleteFile(id)}>×</button></li>)}</ul> : <div className="empty-files">이 폴더는 비어 있어요. 파일을 추가해 보세요.</div>}
         </div>}
 
         {message && <p className="message-note" role="status">{message}<button onClick={() => setMessage('')} aria-label="안내 닫기">×</button></p>}
