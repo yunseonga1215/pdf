@@ -105,6 +105,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
   const [message, setMessage] = useState('');
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [pdfEditingFile, setPdfEditingFile] = useState<{ id: string; file: File } | null>(null);
@@ -330,11 +331,24 @@ export default function Home() {
   const isAudioPreview = !!previewFile && previewType.startsWith('audio/');
   const isTextPreview = !!previewFile && (previewType.startsWith('text/') || ['txt', 'md', 'csv', 'json', 'log', 'xml'].includes(previewExtension || ''));
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem('note-dark-mode') === 'true';
+    setDarkMode(saved);
+    document.documentElement.dataset.theme = saved ? 'dark' : 'light';
+  }, []);
+
+  const toggleDarkMode = () => setDarkMode((current) => {
+    const next = !current;
+    window.localStorage.setItem('note-dark-mode', String(next));
+    document.documentElement.dataset.theme = next ? 'dark' : 'light';
+    return next;
+  });
+
   return (
     <main className="page-shell">
       <header className="topbar">
         <a className="brand" href="#top" aria-label="Note 홈"><span className="brand-mark"><i /><i /><i /></span><span>Note</span></a>
-        <div className="topbar-note"><span className="secure-dot" /> 파일은 이 기기에만 저장돼요</div>
+        <div className="topbar-actions"><button className="theme-toggle" onClick={toggleDarkMode} aria-label={darkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}>{darkMode ? '☀ 라이트' : '☾ 다크'}</button><div className="topbar-note"><span className="secure-dot" /> 파일은 이 기기에만 저장돼요</div></div>
       </header>
 
       <section className="hero" id="top">

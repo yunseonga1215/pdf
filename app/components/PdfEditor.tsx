@@ -174,6 +174,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [tool, setTool] = useState<Tool>('pen');
   const [viewMode, setViewMode] = useState<ViewMode>('viewer');
   const [screenLocked, setScreenLocked] = useState(false);
+  const [notesVisible, setNotesVisible] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saveLabel, setSaveLabel] = useState('불러오는 중');
@@ -358,9 +359,9 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
         <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
         {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button><div className="ink-colors" aria-label="펜 색상">{INK_COLORS.map((color) => <button key={color} aria-label={`펜 색상 ${color}`} aria-pressed={penColor === color} className={penColor === color ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { setPenColor(color); setTool('pen'); }} />)}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
-        <span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span>
+        <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
       </div>
-      <div className="pdf-main">
+      <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
         <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''}`} ref={scrollRef}>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}

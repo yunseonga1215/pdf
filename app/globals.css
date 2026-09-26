@@ -47,3 +47,29 @@ button{font:inherit;cursor:pointer}
 .write-tools-scroll .ink-tools{width:max-content;min-width:100%;flex-wrap:nowrap;justify-content:flex-start}
 @media(max-width:700px){.pdf-toolbar.write-mode-toolbar{padding:6px 8px;row-gap:5px}.mode-switch button{height:28px;padding:0 8px;font-size:9px}.page-indicator{font-size:9px}.write-tools-scroll .tool-button{height:27px;padding:0 7px}.write-tools-scroll .ink-tools select{max-width:none}}
 @media(max-width:390px){.pdf-toolbar.write-mode-toolbar{padding-left:6px;padding-right:6px}.mode-switch button{padding:0 7px;font-size:8px}.write-tools-scroll .ink-tools{gap:5px}.write-tools-scroll .ink-colors button{width:15px;height:15px}}
+.toolbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.write-mode-toolbar .toolbar-actions{grid-column:2;grid-row:1}
+.notes-toggle{min-height:28px;padding:0 8px;border:1px solid #e1e4dc;border-radius:5px;background:#fff;color:#64715e;font:500 9px 'Noto Sans KR',sans-serif;white-space:nowrap}
+.notes-toggle:hover{background:#f2f5ef}
+.pdf-main.notes-hidden{grid-template-columns:minmax(0,1fr)}
+@media(max-width:700px){.toolbar-actions{gap:5px}.notes-toggle{min-height:27px;padding:0 7px;font-size:8px}.pdf-main.notes-hidden{grid-template-rows:minmax(0,1fr)}}
+.topbar-actions{display:flex;align-items:center;gap:14px}
+.theme-toggle{height:30px;padding:0 9px;border:1px solid #e4e7df;border-radius:7px;background:var(--paper);color:var(--ink);font:600 10px 'Noto Sans KR',sans-serif;white-space:nowrap}
+html[data-theme="dark"]{color-scheme:dark;--ink:#e9ece5;--muted:#a0a69b;--line:#363b35;--green:#78956a;--green-dark:#647f58;--wash:#232722;--paper:#292e29;--cream:#1d211e;background:#1d211e}
+html[data-theme="dark"] body{background:#1d211e;color:var(--ink)}
+html[data-theme="dark"] .topbar{border-color:#363b35}
+html[data-theme="dark"] .brand{color:#c5d7ba}
+html[data-theme="dark"] .workspace,html[data-theme="dark"] .folder-card,html[data-theme="dark"] .empty-folders,html[data-theme="dark"] .destination-dialog,html[data-theme="dark"] .preview-dialog,html[data-theme="dark"] .pdf-editor-header,html[data-theme="dark"] .pdf-toolbar,html[data-theme="dark"] .pdf-notes{background:#292e29;color:#e9ece5;border-color:#3b413a}
+html[data-theme="dark"] .dropzone,html[data-theme="dark"] .empty-files{background:#242925;border-color:#424940;color:#d9ded5}
+html[data-theme="dark"] .folder-card.selected,html[data-theme="dark"] .destination-choice.active,html[data-theme="dark"] .tool-button.tool-active,html[data-theme="dark"] .mode-switch button.mode-selected{background:#343e32;color:#d3e3c9}
+html[data-theme="dark"] .folder-card-name,html[data-theme="dark"] .section-heading h2,html[data-theme="dark"] .file-section-head h2,html[data-theme="dark"] .notes-heading strong,html[data-theme="dark"] .preview-header h2{color:#e9ece5}
+html[data-theme="dark"] .folder-card-meta,html[data-theme="dark"] .section-heading>div>span,html[data-theme="dark"] .file-section-head span,html[data-theme="dark"] .file-meta span,html[data-theme="dark"] .notes-heading span,html[data-theme="dark"] .notes-bottom>span,html[data-theme="dark"] .preview-header span{color:#a0a69b}
+html[data-theme="dark"] .file-meta strong,html[data-theme="dark"] .destination-choice strong{color:#e0e5dc}
+html[data-theme="dark"] .dropzone h2,html[data-theme="dark"] .hero-copy,html[data-theme="dark"] .destination-dialog h2{color:#e9ece5}
+html[data-theme="dark"] .destination-choice,html[data-theme="dark"] .folder-name-field input,html[data-theme="dark"] .folder-select,html[data-theme="dark"] .pdf-notes textarea,html[data-theme="dark"] .preview-content pre,html[data-theme="dark"] .tool-button,html[data-theme="dark"] .notes-toggle,html[data-theme="dark"] .theme-toggle,html[data-theme="dark"] .mode-switch button,html[data-theme="dark"] .ink-tools select{background:#222722;color:#e3e7df;border-color:#41483f}
+html[data-theme="dark"] .pdf-editor{background:#202420}
+html[data-theme="dark"] .pdf-toolbar,html[data-theme="dark"] .pdf-notes{border-color:#3b413a}
+html[data-theme="dark"] .pdf-canvas-scroller,html[data-theme="dark"] .preview-content{background:#202420}
+html[data-theme="dark"] .file-item{border-color:#3b413a}
+html[data-theme="dark"] .footer{color:#91998e}
+@media(max-width:600px){.topbar-actions{gap:7px}.theme-toggle{height:28px;padding:0 7px;font-size:9px}.topbar-note{font-size:9px}}
