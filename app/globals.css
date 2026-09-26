@@ -53,6 +53,8 @@ button{font:inherit;cursor:pointer}
 .notes-toggle:hover{background:#f2f5ef}
 .pdf-main.notes-hidden{grid-template-columns:minmax(0,1fr)}
 @media(max-width:700px){.toolbar-actions{gap:5px}.notes-toggle{min-height:27px;padding:0 7px;font-size:8px}.pdf-main.notes-hidden{grid-template-rows:minmax(0,1fr)}}
+.pdf-canvas-scroller{touch-action:pan-y;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch}
+.pdf-page-list,.pdf-page-shell,.pdf-page-canvas,.ink-canvas.viewer-mode{touch-action:pan-y}
 .topbar-actions{display:flex;align-items:center;gap:14px}
 .theme-toggle{height:30px;padding:0 9px;border:1px solid #e4e7df;border-radius:7px;background:var(--paper);color:var(--ink);font:600 10px 'Noto Sans KR',sans-serif;white-space:nowrap}
 html[data-theme="dark"]{color-scheme:dark;--ink:#e9ece5;--muted:#a0a69b;--line:#363b35;--green:#78956a;--green-dark:#647f58;--wash:#232722;--paper:#292e29;--cream:#1d211e;background:#1d211e}
