@@ -38,6 +38,25 @@ const blankMarkup = (): PdfMarkup => ({ notes: {}, strokes: {} });
 const INK_COLORS = ['#202820', '#d94f46', '#3367c7', '#e09b23', '#7b4bb5'];
 const HIGHLIGHTER_COLORS = ['#ffe45e', '#ff78a8', '#62b7ff', '#70d99a'];
 
+function addOlderBrowserPromiseSupport() {
+  type WithResolvers<T> = { promise: Promise<T>; resolve: (value: T | PromiseLike<T>) => void; reject: (reason?: unknown) => void };
+  const promiseConstructor = Promise as PromiseConstructor & { withResolvers?: <T>() => WithResolvers<T> };
+  if (!promiseConstructor.withResolvers) {
+    Object.defineProperty(Promise, 'withResolvers', {
+      configurable: true,
+      value: <T,>(): WithResolvers<T> => {
+        let resolve!: WithResolvers<T>['resolve'];
+        let reject!: WithResolvers<T>['reject'];
+        const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+          resolve = resolvePromise;
+          reject = rejectPromise;
+        });
+        return { promise, resolve, reject };
+      },
+    });
+  }
+}
+
 function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -195,11 +214,16 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
     let loadingTask: { destroy: () => Promise<void>; promise: Promise<PDFDocumentProxy> } | null = null;
     async function loadDocument() {
       try {
-        const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+        addOlderBrowserPromiseSupport();
+        const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs?v=${pdfjs.version}`;
         const bytes = new Uint8Array(await file.arrayBuffer());
         loadingTask = pdfjs.getDocument({ data: bytes });
-        const [pdf, savedMarkup] = await Promise.all([loadingTask.promise, loadMarkup(fileId)]);
+        const savedMarkupPromise = loadMarkup(fileId).catch((cause) => {
+          console.warn('PDF 메모를 불러오지 못해 빈 메모로 엽니다.', cause);
+          return blankMarkup();
+        });
+        const [pdf, savedMarkup] = await Promise.all([loadingTask.promise, savedMarkupPromise]);
         if (cancelled) return;
         const sizes = await Promise.all(Array.from({ length: pdf.numPages }, async (_, index) => {
           const page = await pdf.getPage(index + 1);
