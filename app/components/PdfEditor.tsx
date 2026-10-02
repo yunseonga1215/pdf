@@ -11,7 +11,7 @@ type EraserMode = 'partial' | 'stroke';
 type ViewMode = 'viewer' | 'write';
 type SearchBox = { left: number; top: number; width: number; height: number };
 type SearchUnit = { text: string; box?: SearchBox };
-type SearchHit = { pageNumber: number; box?: SearchBox; excerpt: string };
+type SearchHit = { pageNumber: number; boxes?: SearchBox[]; excerpt: string };
 type OcrWorker = Awaited<ReturnType<typeof import('tesseract.js').createWorker>>;
 
 type EditorProps = {
@@ -32,7 +32,7 @@ type PageProps = {
   penColor: string;
   penSize: number;
   mode: ViewMode;
-  searchBox?: SearchBox;
+  searchBoxes?: SearchBox[];
   scrollRoot: RefObject<HTMLDivElement | null>;
   onActivate: (pageNumber: number) => void;
   onDraw: (pageNumber: number, point: [number, number], begin: boolean) => void;
@@ -52,10 +52,14 @@ function findSearchHits(units: SearchUnit[], query: string, pageNumber: number):
   if (!normalizedQuery) return [];
   const characters: string[] = [];
   const characterUnits: number[] = [];
+  const characterOffsets: number[] = [];
   units.forEach((unit, unitIndex) => {
-    for (const character of normalizeSearchText(unit.text).replace(/\s/g, '')) {
+    const normalizedUnit = normalizeSearchText(unit.text).replace(/\s/g, '');
+    for (let offset = 0; offset < normalizedUnit.length; offset += 1) {
+      const character = normalizedUnit[offset];
       characters.push(character);
       characterUnits.push(unitIndex);
+      characterOffsets.push(offset);
     }
   });
   const searchableText = characters.join('');
@@ -65,17 +69,23 @@ function findSearchHits(units: SearchUnit[], query: string, pageNumber: number):
     const matchIndex = searchableText.indexOf(normalizedQuery, fromIndex);
     if (matchIndex < 0) break;
     const matchEnd = matchIndex + normalizedQuery.length;
-    const matchingUnitIndexes = [...new Set(characterUnits.slice(matchIndex, matchEnd))];
-    const boxes = matchingUnitIndexes.flatMap((index) => units[index].box ? [units[index].box!] : []);
-    let box: SearchBox | undefined;
-    if (boxes.length) {
-      const left = Math.min(...boxes.map((item) => item.left));
-      const top = Math.min(...boxes.map((item) => item.top));
-      const right = Math.max(...boxes.map((item) => item.left + item.width));
-      const bottom = Math.max(...boxes.map((item) => item.top + item.height));
-      box = { left, top, width: right - left, height: bottom - top };
+    const matchedOffsets = new Map<number, number[]>();
+    for (let index = matchIndex; index < matchEnd; index += 1) {
+      const unitIndex = characterUnits[index];
+      const offsets = matchedOffsets.get(unitIndex) || [];
+      offsets.push(characterOffsets[index]);
+      matchedOffsets.set(unitIndex, offsets);
     }
-    matches.push({ pageNumber, box, excerpt: searchableText.slice(Math.max(0, matchIndex - 18), Math.min(searchableText.length, matchEnd + 18)) });
+    const boxes = [...matchedOffsets.entries()].flatMap(([unitIndex, offsets]) => {
+      const unit = units[unitIndex];
+      if (!unit.box) return [];
+      const normalizedLength = normalizeSearchText(unit.text).replace(/\s/g, '').length;
+      const from = Math.min(...offsets);
+      const to = Math.max(...offsets) + 1;
+      const left = unit.box.left + unit.box.width * from / normalizedLength;
+      return [{ ...unit.box, left, width: unit.box.width * (to - from) / normalizedLength }];
+    });
+    matches.push({ pageNumber, boxes, excerpt: searchableText.slice(Math.max(0, matchIndex - 18), Math.min(searchableText.length, matchEnd + 18)) });
     fromIndex = matchIndex + 1;
   }
   return matches;
@@ -118,7 +128,7 @@ function addOlderBrowserPromiseSupport() {
   }
 }
 
-function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, searchBox, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
+function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, searchBoxes, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const inkCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -246,7 +256,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
   return <div id={`pdf-page-${pageNumber}`} ref={shellRef} className="pdf-page-shell" style={{ width, height }} onPointerDown={() => onActivate(pageNumber)}>
     <canvas ref={pdfCanvasRef} className="pdf-page-canvas" />
     <canvas ref={inkCanvasRef} className={`ink-canvas ${mode === 'write' ? 'ink-enabled' : 'viewer-mode'} ${tool === 'eraser' && mode === 'write' ? 'eraser-enabled' : ''}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
-    {searchBox && <div className="pdf-search-highlight" style={{ left: `${searchBox.left * 100}%`, top: `${searchBox.top * 100}%`, width: `${searchBox.width * 100}%`, height: `${searchBox.height * 100}%` }} aria-hidden="true" />}
+    {searchBoxes?.map((box, index) => <div key={index} className="pdf-search-highlight" style={{ left: `${box.left * 100}%`, top: `${box.top * 100}%`, width: `${box.width * 100}%`, height: `${box.height * 100}%` }} aria-hidden="true" />)}
   </div>;
 }
 
@@ -442,9 +452,9 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
     if (!root || !pageElement) return;
     const rootBounds = root.getBoundingClientRect();
     const pageBounds = pageElement.getBoundingClientRect();
-    const hitCenter = hit.box
-      ? pageBounds.top + (hit.box.top + hit.box.height / 2) * pageBounds.height
-      : pageBounds.top + pageBounds.height / 2;
+    const hitTop = hit.boxes?.length ? Math.min(...hit.boxes.map((box) => box.top)) : 0.5;
+    const hitBottom = hit.boxes?.length ? Math.max(...hit.boxes.map((box) => box.top + box.height)) : 0.5;
+    const hitCenter = pageBounds.top + ((hitTop + hitBottom) / 2) * pageBounds.height;
     root.scrollBy({ top: hitCenter - (rootBounds.top + root.clientHeight / 2), behavior: 'smooth' });
     setPageNumber(hit.pageNumber);
   };
@@ -628,7 +638,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
         <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
         {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button>{tool === 'eraser' && <select className="eraser-mode-select" value={eraserMode} onChange={(event) => setEraserMode(event.target.value as EraserMode)} aria-label="지우개 방식"><option value="partial">부분 지우개</option><option value="stroke">획 전체 지우개</option></select>}<div className="ink-colors" aria-label={tool === 'highlighter' ? '형광펜 색상' : '펜 색상'}>{(tool === 'highlighter' ? HIGHLIGHTER_COLORS : INK_COLORS).map((color) => { const selected = tool === 'highlighter' ? highlighterColor === color : penColor === color; return <button key={color} aria-label={`${tool === 'highlighter' ? '형광펜' : '펜'} 색상 ${color}`} aria-pressed={selected} className={selected ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { if (tool === 'highlighter') { setHighlighterColor(color); setTool('highlighter'); } else { setPenColor(color); setTool('pen'); } }} />; })}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
-        <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="search-toggle" onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen}>찾기</button><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
+        <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="search-toggle" onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="6.4" /><path d="m16 16 4.2 4.2" /></svg><span>찾기</span></button><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
       </div>
       {searchOpen && <div className="pdf-search-bar" role="search">
         <div className="pdf-search-input"><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setSearchHits([]); setActiveSearchIndex(-1); setSearchStatus(''); }} onKeyDown={(event) => { if (event.key === 'Enter') void searchDocument(); }} placeholder="PDF에서 단어 또는 문장 찾기" aria-label="PDF에서 검색" disabled={searching} /><button onClick={() => void searchDocument()} disabled={loading || searching || !searchQuery.trim()}>{searching ? '검색 중…' : '검색'}</button></div>
@@ -639,7 +649,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
         <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''}`} ref={scrollRef}>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}
-          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => { const activeHit = activeSearchIndex >= 0 ? searchHits[activeSearchIndex] : null; return <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} searchBox={activeHit?.pageNumber === index + 1 ? activeHit.box : undefined} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />; })}</div>}
+          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => { const activeHit = activeSearchIndex >= 0 ? searchHits[activeSearchIndex] : null; return <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} searchBoxes={activeHit?.pageNumber === index + 1 ? activeHit.boxes : undefined} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />; })}</div>}
         </div>
         {notesVisible && <aside className="pdf-notes"><div className="notes-heading"><strong>페이지별 메모</strong><span>{pageNumber}페이지 · 입력 즉시 자동 저장</span></div><textarea value={currentNote} onChange={(event) => setMarkup((current) => ({ ...current, notes: { ...current.notes, [pageNumber]: event.target.value } }))} placeholder="이 페이지의 메모를 적어 보세요…" /><div className="notes-bottom"><span>{currentPageStrokes.length}개 필기 · {screenLocked ? '화면 고정됨' : '세로 스크롤 가능'}</span><button onClick={() => void exportAnnotatedPdf()} disabled={loading || exporting}>{exporting ? 'PDF 만드는 중…' : '필기 포함 PDF 저장'}</button></div></aside>}
       </div>

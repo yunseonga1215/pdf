@@ -78,6 +78,7 @@ html[data-theme="dark"] .footer{color:#91998e}
 @media(max-width:600px){.topbar-actions{gap:7px}.theme-toggle{height:28px;padding:0 7px;font-size:9px}.topbar-note{font-size:9px}}
 @media(max-width:700px){.pdf-notes textarea,.folder-name-field input,.folder-select{font-size:16px;line-height:1.5}.pdf-notes textarea{padding:8px}}
 .search-toggle,.pdf-search-input>button,.pdf-search-results button{min-height:28px;padding:0 8px;border:1px solid #e1e4dc;border-radius:5px;background:#fff;color:#64715e;font:500 9px 'Noto Sans KR',sans-serif;white-space:nowrap}
+.search-toggle{display:inline-flex;align-items:center;justify-content:center;gap:4px}.search-toggle svg{width:13px;height:13px;flex:0 0 13px;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .search-toggle:hover,.pdf-search-input>button:hover:not(:disabled),.pdf-search-results button:hover:not(:disabled){background:#f2f5ef}
 .pdf-search-input>button:disabled,.pdf-search-results button:disabled{opacity:.48;cursor:default}
 .pdf-search-bar{flex:0 0 auto;display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr);align-items:center;gap:12px;padding:8px 14px;background:#fafbf8;border-bottom:1px solid #e7e9e2}
@@ -91,8 +92,8 @@ html[data-theme="dark"] .footer{color:#91998e}
 .pdf-search-results>div{display:flex;gap:5px;flex:0 0 auto}
 .pdf-search-help{grid-column:1/-1;margin-top:-5px;color:#969b91;font-size:8px;line-height:1.4}
 .pdf-search-results button{height:27px;min-height:27px}
-.pdf-search-highlight{position:absolute;z-index:2;pointer-events:none;border:2px solid rgba(241,170,29,.95);border-radius:3px;background:rgba(255,224,80,.32);box-shadow:0 0 0 2px rgba(255,255,255,.72);animation:search-hit-pulse .8s ease-out 1}
-@keyframes search-hit-pulse{0%{background:rgba(255,192,40,.72)}100%{background:rgba(255,224,80,.32)}}
+.pdf-search-highlight{position:absolute;z-index:2;pointer-events:none;border:0;border-radius:2px;background:rgba(255,238,40,.58);mix-blend-mode:multiply;transform:scaleY(1.16);transform-origin:center;animation:search-hit-pulse .8s ease-out 1}
+@keyframes search-hit-pulse{0%{background:rgba(255,233,20,.82)}100%{background:rgba(255,238,40,.58)}}
 html[data-theme="dark"] .pdf-search-bar{background:#252a25;border-color:#3b413a}
 html[data-theme="dark"] .pdf-search-input input,html[data-theme="dark"] .search-toggle,html[data-theme="dark"] .pdf-search-results button{background:#202520;color:#e3e7df;border-color:#41483f}
 html[data-theme="dark"] .pdf-search-results>span{color:#b1b8ad}
