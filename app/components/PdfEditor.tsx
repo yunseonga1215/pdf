@@ -748,20 +748,16 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       </div>}
       <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
         <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''} ${zoomScale > 1 ? 'zoomed' : ''}`} ref={scrollRef}>
-          <div className="pdf-zoom-controls" role="group" aria-label="PDF 확대/축소">
-            {zoomControlsOpen ? <>
-              <button onClick={() => adjustZoom(-0.25)} disabled={loading || zoomScale <= 0.5} aria-label="축소" title="축소">−</button>
-              <span aria-live="polite">{Math.round(shownZoomScale * 100)}%</span>
-              <button onClick={() => adjustZoom(0.25)} disabled={loading || zoomScale >= 3} aria-label="확대" title="확대">+</button>
-              <button className="zoom-fit-button" onClick={fitPageToScreen} disabled={loading || (zoomScale === 1 && pinchZoomScale === null)} aria-label="화면 맞춤">맞춤</button>
-            </> : <button className="zoom-level-toggle" onClick={() => revealZoomControls()} aria-label={`확대 도구 열기, 현재 ${Math.round(zoomScale * 100)}%`} aria-expanded={zoomControlsOpen} title="확대/축소 도구">
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="6.4" /><path d="m16 16 4.2 4.2M10.8 7.8v6M7.8 10.8h6" /></svg><span>{Math.round(zoomScale * 100)}%</span>
-            </button>}
-          </div>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}
           {!loading && !error && document && <div className="pdf-page-list" style={{ width: `${Math.max(100, zoomScale * 100)}%`, transform: pinchZoomScale === null ? undefined : `scale(${pinchZoomScale / zoomScale})`, transformOrigin: pinchOrigin ? `${pinchOrigin.x}px ${pinchOrigin.y}px` : 'top center' }}>{pageSizes.map((size, index) => { const activeHit = activeSearchIndex >= 0 ? searchHits[activeSearchIndex] : null; return <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} searchBoxes={activeHit?.pageNumber === index + 1 ? activeHit.boxes : undefined} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />; })}</div>}
         </div>
+        {zoomControlsOpen && <div className="pdf-zoom-controls" role="group" aria-label="PDF 확대/축소">
+          <button onClick={() => adjustZoom(-0.25)} disabled={loading || zoomScale <= 0.5} aria-label="축소" title="축소">−</button>
+          <span aria-live="polite">{Math.round(shownZoomScale * 100)}%</span>
+          <button onClick={() => adjustZoom(0.25)} disabled={loading || zoomScale >= 3} aria-label="확대" title="확대">+</button>
+          <button className="zoom-fit-button" onClick={fitPageToScreen} disabled={loading || (zoomScale === 1 && pinchZoomScale === null)} aria-label="화면 맞춤">맞춤</button>
+        </div>}
         {notesVisible && <aside className="pdf-notes"><div className="notes-heading"><strong>페이지별 메모</strong><span>{pageNumber}페이지 · 입력 즉시 자동 저장</span></div><textarea value={currentNote} onChange={(event) => setMarkup((current) => ({ ...current, notes: { ...current.notes, [pageNumber]: event.target.value } }))} placeholder="이 페이지의 메모를 적어 보세요…" /><div className="notes-bottom"><span>{currentPageStrokes.length}개 필기 · {screenLocked ? '화면 고정됨' : '세로 스크롤 가능'}</span><button onClick={() => void exportAnnotatedPdf()} disabled={loading || exporting}>{exporting ? 'PDF 만드는 중…' : '필기 포함 PDF 저장'}</button></div></aside>}
       </div>
     </section>
