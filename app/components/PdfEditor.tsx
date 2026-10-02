@@ -9,6 +9,10 @@ type PageSize = { width: number; height: number };
 type Tool = 'pen' | 'eraser' | 'highlighter';
 type EraserMode = 'partial' | 'stroke';
 type ViewMode = 'viewer' | 'write';
+type SearchBox = { left: number; top: number; width: number; height: number };
+type SearchUnit = { text: string; box?: SearchBox };
+type SearchHit = { pageNumber: number; box?: SearchBox; excerpt: string };
+type OcrWorker = Awaited<ReturnType<typeof import('tesseract.js').createWorker>>;
 
 type EditorProps = {
   file: File;
@@ -28,6 +32,7 @@ type PageProps = {
   penColor: string;
   penSize: number;
   mode: ViewMode;
+  searchBox?: SearchBox;
   scrollRoot: RefObject<HTMLDivElement | null>;
   onActivate: (pageNumber: number) => void;
   onDraw: (pageNumber: number, point: [number, number], begin: boolean) => void;
@@ -37,6 +42,62 @@ type PageProps = {
 const blankMarkup = (): PdfMarkup => ({ notes: {}, strokes: {} });
 const INK_COLORS = ['#202820', '#d94f46', '#3367c7', '#e09b23', '#7b4bb5'];
 const HIGHLIGHTER_COLORS = ['#ffe45e', '#ff78a8', '#62b7ff', '#70d99a'];
+
+function normalizeSearchText(text: string) {
+  return text.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function findSearchHits(units: SearchUnit[], query: string, pageNumber: number): SearchHit[] {
+  const normalizedQuery = normalizeSearchText(query).replace(/\s/g, '');
+  if (!normalizedQuery) return [];
+  const characters: string[] = [];
+  const characterUnits: number[] = [];
+  units.forEach((unit, unitIndex) => {
+    for (const character of normalizeSearchText(unit.text).replace(/\s/g, '')) {
+      characters.push(character);
+      characterUnits.push(unitIndex);
+    }
+  });
+  const searchableText = characters.join('');
+  const matches: SearchHit[] = [];
+  let fromIndex = 0;
+  while (fromIndex <= searchableText.length - normalizedQuery.length) {
+    const matchIndex = searchableText.indexOf(normalizedQuery, fromIndex);
+    if (matchIndex < 0) break;
+    const matchEnd = matchIndex + normalizedQuery.length;
+    const matchingUnitIndexes = [...new Set(characterUnits.slice(matchIndex, matchEnd))];
+    const boxes = matchingUnitIndexes.flatMap((index) => units[index].box ? [units[index].box!] : []);
+    let box: SearchBox | undefined;
+    if (boxes.length) {
+      const left = Math.min(...boxes.map((item) => item.left));
+      const top = Math.min(...boxes.map((item) => item.top));
+      const right = Math.max(...boxes.map((item) => item.left + item.width));
+      const bottom = Math.max(...boxes.map((item) => item.top + item.height));
+      box = { left, top, width: right - left, height: bottom - top };
+    }
+    matches.push({ pageNumber, box, excerpt: searchableText.slice(Math.max(0, matchIndex - 18), Math.min(searchableText.length, matchEnd + 18)) });
+    fromIndex = matchIndex + 1;
+  }
+  return matches;
+}
+
+function parseHocrWords(hocr: string | null, width: number, height: number): SearchUnit[] {
+  if (!hocr) return [];
+  const parsed = new DOMParser().parseFromString(hocr, 'text/html');
+  return Array.from(parsed.querySelectorAll('.ocrx_word')).flatMap((element) => {
+    const text = element.textContent?.trim() || '';
+    const bbox = element.getAttribute('title')?.match(/bbox\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/);
+    if (!text || !bbox) return [];
+    const x0 = Number(bbox[1]);
+    const y0 = Number(bbox[2]);
+    const x1 = Number(bbox[3]);
+    const y1 = Number(bbox[4]);
+    return [{
+      text,
+      box: { left: x0 / width, top: y0 / height, width: (x1 - x0) / width, height: (y1 - y0) / height },
+    }];
+  });
+}
 
 function addOlderBrowserPromiseSupport() {
   type WithResolvers<T> = { promise: Promise<T>; resolve: (value: T | PromiseLike<T>) => void; reject: (reason?: unknown) => void };
@@ -57,7 +118,7 @@ function addOlderBrowserPromiseSupport() {
   }
 }
 
-function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
+function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor, penSize, mode, searchBox, scrollRoot, onActivate, onDraw, onErase }: PageProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const inkCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -185,6 +246,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
   return <div id={`pdf-page-${pageNumber}`} ref={shellRef} className="pdf-page-shell" style={{ width, height }} onPointerDown={() => onActivate(pageNumber)}>
     <canvas ref={pdfCanvasRef} className="pdf-page-canvas" />
     <canvas ref={inkCanvasRef} className={`ink-canvas ${mode === 'write' ? 'ink-enabled' : 'viewer-mode'} ${tool === 'eraser' && mode === 'write' ? 'eraser-enabled' : ''}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
+    {searchBox && <div className="pdf-search-highlight" style={{ left: `${searchBox.left * 100}%`, top: `${searchBox.top * 100}%`, width: `${searchBox.width * 100}%`, height: `${searchBox.height * 100}%` }} aria-hidden="true" />}
   </div>;
 }
 
@@ -203,11 +265,26 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [notesVisible, setNotesVisible] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+  const [searching, setSearching] = useState(false);
+  const [searchProgress, setSearchProgress] = useState({ done: 0, total: 0 });
+  const [searchStatus, setSearchStatus] = useState('');
   const [saveLabel, setSaveLabel] = useState('불러오는 중');
   const [exporting, setExporting] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(800);
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
+  const ocrWorkerRef = useRef<OcrWorker | null>(null);
+  const searchUnitCacheRef = useRef(new Map<number, SearchUnit[]>());
+  const searchRunRef = useRef(0);
+
+  useEffect(() => () => {
+    searchRunRef.current += 1;
+    if (ocrWorkerRef.current) void ocrWorkerRef.current.terminate();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +376,121 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       window.removeEventListener('resize', updatePage);
     };
   }, [document, pageSizes.length]);
+
+  const getOcrWorker = async () => {
+    if (ocrWorkerRef.current) return ocrWorkerRef.current;
+    setSearchStatus('한국어·영어 OCR 엔진을 준비하는 중…');
+    const { createWorker } = await import('tesseract.js');
+    const worker = await createWorker('kor+eng', 1, {
+      logger: (message) => {
+        if (message.status) setSearchStatus(`OCR 준비 중 · ${message.status}${message.progress > 0 ? ` ${Math.round(message.progress * 100)}%` : ''}`);
+      },
+    });
+    ocrWorkerRef.current = worker;
+    return worker;
+  };
+
+  const getSearchUnits = async (targetPage: number): Promise<SearchUnit[]> => {
+    const cached = searchUnitCacheRef.current.get(targetPage);
+    if (cached) return cached;
+    if (!document) return [];
+    const page = await document.getPage(targetPage);
+    const viewport = page.getViewport({ scale: 1 });
+    const textContent = await page.getTextContent();
+    const textItems = textContent.items.filter((item): item is { str: string; dir: string; transform: number[]; width: number; height: number; fontName: string; hasEOL: boolean } => 'str' in item && typeof item.str === 'string');
+    const readableText = textItems.map((item) => item.str).join('').trim();
+    let units: SearchUnit[];
+
+    if (readableText.length >= 16) {
+      units = textItems.filter((item) => item.str.trim()).map((item) => {
+        const x = Number(item.transform[4] || 0);
+        const y = Number(item.transform[5] || 0);
+        const first = viewport.convertToViewportPoint(x, y);
+        const second = viewport.convertToViewportPoint(x + item.width, y + item.height);
+        const left = Math.max(0, Math.min(first[0], second[0]) / viewport.width);
+        const top = Math.max(0, Math.min(first[1], second[1]) / viewport.height);
+        const right = Math.min(1, Math.max(first[0], second[0]) / viewport.width);
+        const bottom = Math.min(1, Math.max(first[1], second[1]) / viewport.height);
+        return { text: item.str, box: { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) } };
+      });
+    } else {
+      const worker = await getOcrWorker();
+      const maxPixels = 2_500_000;
+      const scale = Math.min(2, 1600 / viewport.width, Math.sqrt(maxPixels / (viewport.width * viewport.height)));
+      const ocrViewport = page.getViewport({ scale });
+      const canvas = window.document.createElement('canvas');
+      canvas.width = Math.ceil(ocrViewport.width);
+      canvas.height = Math.ceil(ocrViewport.height);
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) throw new Error('OCR용 페이지 이미지를 준비하지 못했어요.');
+      await page.render({ canvas, canvasContext: context, viewport: ocrViewport }).promise;
+      try {
+        const recognized = await worker.recognize(canvas, {}, { hocr: true });
+        units = parseHocrWords(recognized.data.hocr, canvas.width, canvas.height);
+      } finally {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    }
+    searchUnitCacheRef.current.set(targetPage, units);
+    return units;
+  };
+
+  const scrollToSearchHit = (hit: SearchHit) => {
+    const root = scrollRef.current;
+    const pageElement = window.document.getElementById(`pdf-page-${hit.pageNumber}`);
+    if (!root || !pageElement) return;
+    const rootBounds = root.getBoundingClientRect();
+    const pageBounds = pageElement.getBoundingClientRect();
+    const hitCenter = hit.box
+      ? pageBounds.top + (hit.box.top + hit.box.height / 2) * pageBounds.height
+      : pageBounds.top + pageBounds.height / 2;
+    root.scrollBy({ top: hitCenter - (rootBounds.top + root.clientHeight / 2), behavior: 'smooth' });
+    setPageNumber(hit.pageNumber);
+  };
+
+  const goToSearchHit = (index: number, hits = searchHits) => {
+    if (!hits.length) return;
+    const nextIndex = (index + hits.length) % hits.length;
+    setActiveSearchIndex(nextIndex);
+    scrollToSearchHit(hits[nextIndex]);
+  };
+
+  const searchDocument = async () => {
+    const query = searchQuery.trim();
+    if (!document || !query || searching) return;
+    const runId = ++searchRunRef.current;
+    setSearching(true);
+    setSearchHits([]);
+    setActiveSearchIndex(-1);
+    setSearchProgress({ done: 0, total: pageSizes.length });
+    setSearchStatus('문서에서 검색 중…');
+    const found: SearchHit[] = [];
+    try {
+      for (let targetPage = 1; targetPage <= pageSizes.length; targetPage++) {
+        if (runId !== searchRunRef.current) return;
+        setSearchProgress({ done: targetPage - 1, total: pageSizes.length });
+        setSearchStatus(`${targetPage} / ${pageSizes.length}페이지 검색 중…`);
+        const units = await getSearchUnits(targetPage);
+        found.push(...findSearchHits(units, query, targetPage));
+      }
+      if (runId !== searchRunRef.current) return;
+      setSearchHits(found);
+      setSearchStatus(found.length ? `${found.length}곳을 찾았어요.` : '일치하는 내용을 찾지 못했어요.');
+      setSearchProgress({ done: pageSizes.length, total: pageSizes.length });
+      if (found.length) {
+        setActiveSearchIndex(0);
+        window.setTimeout(() => scrollToSearchHit(found[0]), 0);
+      }
+    } catch (cause) {
+      if (runId === searchRunRef.current) {
+        setSearchStatus(cause instanceof Error ? `검색하지 못했어요: ${cause.message}` : '검색 중 문제가 생겼어요.');
+      }
+    } finally {
+      if (runId === searchRunRef.current) setSearching(false);
+    }
+  };
+
   const pointDistance = (left: [number, number], right: [number, number]) => Math.hypot(left[0] - right[0], left[1] - right[1]);
   const drawPoint = (targetPage: number, point: [number, number], begin: boolean) => {
     setMarkup((current) => {
@@ -436,13 +628,18 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
         <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
         {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button>{tool === 'eraser' && <select className="eraser-mode-select" value={eraserMode} onChange={(event) => setEraserMode(event.target.value as EraserMode)} aria-label="지우개 방식"><option value="partial">부분 지우개</option><option value="stroke">획 전체 지우개</option></select>}<div className="ink-colors" aria-label={tool === 'highlighter' ? '형광펜 색상' : '펜 색상'}>{(tool === 'highlighter' ? HIGHLIGHTER_COLORS : INK_COLORS).map((color) => { const selected = tool === 'highlighter' ? highlighterColor === color : penColor === color; return <button key={color} aria-label={`${tool === 'highlighter' ? '형광펜' : '펜'} 색상 ${color}`} aria-pressed={selected} className={selected ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { if (tool === 'highlighter') { setHighlighterColor(color); setTool('highlighter'); } else { setPenColor(color); setTool('pen'); } }} />; })}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
-        <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
+        <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="search-toggle" onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen}>찾기</button><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
       </div>
+      {searchOpen && <div className="pdf-search-bar" role="search">
+        <div className="pdf-search-input"><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setSearchHits([]); setActiveSearchIndex(-1); setSearchStatus(''); }} onKeyDown={(event) => { if (event.key === 'Enter') void searchDocument(); }} placeholder="PDF에서 단어 또는 문장 찾기" aria-label="PDF에서 검색" disabled={searching} /><button onClick={() => void searchDocument()} disabled={loading || searching || !searchQuery.trim()}>{searching ? '검색 중…' : '검색'}</button></div>
+        <div className="pdf-search-results"><span role="status">{searching ? `${searchStatus} (${searchProgress.done}/${searchProgress.total})` : searchHits.length && activeSearchIndex >= 0 ? `전체 ${searchHits.length}곳 · ${activeSearchIndex + 1}/${searchHits.length} · ${searchHits[activeSearchIndex].pageNumber}페이지` : searchStatus || '검색어를 입력하세요'}</span><div><button onClick={() => goToSearchHit(activeSearchIndex - 1)} disabled={!searchHits.length || searching}>이전</button><button onClick={() => goToSearchHit(activeSearchIndex + 1)} disabled={!searchHits.length || searching}>다음</button></div></div>
+        <small className="pdf-search-help">이미지 페이지는 이 기기에서 OCR 검색해요. 처음에는 OCR 언어 데이터 다운로드가 필요해요.</small>
+      </div>}
       <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
         <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''}`} ref={scrollRef}>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}
-          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />)}</div>}
+          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => { const activeHit = activeSearchIndex >= 0 ? searchHits[activeSearchIndex] : null; return <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} searchBox={activeHit?.pageNumber === index + 1 ? activeHit.box : undefined} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />; })}</div>}
         </div>
         {notesVisible && <aside className="pdf-notes"><div className="notes-heading"><strong>페이지별 메모</strong><span>{pageNumber}페이지 · 입력 즉시 자동 저장</span></div><textarea value={currentNote} onChange={(event) => setMarkup((current) => ({ ...current, notes: { ...current.notes, [pageNumber]: event.target.value } }))} placeholder="이 페이지의 메모를 적어 보세요…" /><div className="notes-bottom"><span>{currentPageStrokes.length}개 필기 · {screenLocked ? '화면 고정됨' : '세로 스크롤 가능'}</span><button onClick={() => void exportAnnotatedPdf()} disabled={loading || exporting}>{exporting ? 'PDF 만드는 중…' : '필기 포함 PDF 저장'}</button></div></aside>}
       </div>
