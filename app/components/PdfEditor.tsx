@@ -305,11 +305,19 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [saveLabel, setSaveLabel] = useState('불러오는 중');
   const [exporting, setExporting] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(800);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [pinchZoomScale, setPinchZoomScale] = useState<number | null>(null);
+  const [pinchOrigin, setPinchOrigin] = useState<{ x: number; y: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const zoomScaleRef = useRef(1);
+  const viewModeRef = useRef<ViewMode>('viewer');
+  const pinchZoomRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
   const ocrWorkerRef = useRef<OcrWorker | null>(null);
   const searchUnitCacheRef = useRef(new Map<number, SearchUnit[]>());
   const searchRunRef = useRef(0);
+  zoomScaleRef.current = zoomScale;
+  viewModeRef.current = viewMode;
 
   useEffect(() => () => {
     searchRunRef.current += 1;
@@ -364,6 +372,54 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
     observer.observe(root);
     return () => observer.disconnect();
   }, [document]);
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    let pinchStart: { distance: number; scale: number } | null = null;
+    const touchDistance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    const startPinch = (event: TouchEvent) => {
+      if (viewModeRef.current !== 'viewer' || event.touches.length < 2) return;
+      event.preventDefault();
+      pinchStart = { distance: Math.max(1, touchDistance(event.touches)), scale: zoomScaleRef.current };
+      const pageList = root.querySelector<HTMLElement>('.pdf-page-list');
+      if (pageList) {
+        const bounds = pageList.getBoundingClientRect();
+        const midpointX = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+        const midpointY = (event.touches[0].clientY + event.touches[1].clientY) / 2;
+        setPinchOrigin({ x: midpointX - bounds.left, y: midpointY - bounds.top });
+      }
+      pinchZoomRef.current = zoomScaleRef.current;
+      setPinchZoomScale(zoomScaleRef.current);
+    };
+    const movePinch = (event: TouchEvent) => {
+      if (!pinchStart || event.touches.length < 2) return;
+      event.preventDefault();
+      const nextScale = Math.min(3, Math.max(0.5, pinchStart.scale * touchDistance(event.touches) / pinchStart.distance));
+      pinchZoomRef.current = nextScale;
+      setPinchZoomScale(nextScale);
+    };
+    const finishPinch = () => {
+      if (!pinchStart) return;
+      const nextScale = pinchZoomRef.current ?? zoomScaleRef.current;
+      pinchStart = null;
+      pinchZoomRef.current = null;
+      zoomScaleRef.current = nextScale;
+      setZoomScale(nextScale);
+      setPinchZoomScale(null);
+      setPinchOrigin(null);
+    };
+    root.addEventListener('touchstart', startPinch, { passive: false });
+    root.addEventListener('touchmove', movePinch, { passive: false });
+    root.addEventListener('touchend', finishPinch);
+    root.addEventListener('touchcancel', finishPinch);
+    return () => {
+      root.removeEventListener('touchstart', startPinch);
+      root.removeEventListener('touchmove', movePinch);
+      root.removeEventListener('touchend', finishPinch);
+      root.removeEventListener('touchcancel', finishPinch);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loadedRef.current) return;
@@ -650,7 +706,10 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
 
   const currentPageStrokes = markup.strokes[pageNumber] || [];
   const currentNote = markup.notes[pageNumber] || '';
-  const pageWidth = Math.min(viewerWidth, 920);
+  const pageWidth = Math.min(viewerWidth, 920) * zoomScale;
+  const shownZoomScale = pinchZoomScale ?? zoomScale;
+  const adjustZoom = (amount: number) => setZoomScale((current) => Math.min(3, Math.max(0.5, Math.round((current + amount) * 100) / 100)));
+  const fitPageToScreen = () => { setZoomScale(1); setPinchZoomScale(null); setPinchOrigin(null); scrollRef.current?.scrollTo({ left: 0, behavior: 'smooth' }); };
   const activeInkSize = tool === 'highlighter' ? highlighterSize : penSize;
 
   return <div className="pdf-editor-backdrop">
@@ -676,10 +735,16 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
         <small className="pdf-search-help">이미지 페이지는 이 기기에서 OCR 검색해요. 처음에는 OCR 언어 데이터 다운로드가 필요해요.</small>
       </div>}
       <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
-        <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''}`} ref={scrollRef}>
+        <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''} ${zoomScale > 1 ? 'zoomed' : ''}`} ref={scrollRef}>
+          <div className="pdf-zoom-controls" role="group" aria-label="PDF 확대/축소">
+            <button onClick={() => adjustZoom(-0.25)} disabled={loading || zoomScale <= 0.5} aria-label="축소" title="축소">−</button>
+            <span aria-live="polite">{Math.round(shownZoomScale * 100)}%</span>
+            <button onClick={() => adjustZoom(0.25)} disabled={loading || zoomScale >= 3} aria-label="확대" title="확대">+</button>
+            <button className="zoom-fit-button" onClick={fitPageToScreen} disabled={loading || (zoomScale === 1 && pinchZoomScale === null)} aria-label="화면 맞춤">맞춤</button>
+          </div>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}
-          {!loading && !error && document && <div className="pdf-page-list">{pageSizes.map((size, index) => { const activeHit = activeSearchIndex >= 0 ? searchHits[activeSearchIndex] : null; return <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} searchBoxes={activeHit?.pageNumber === index + 1 ? activeHit.boxes : undefined} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />; })}</div>}
+          {!loading && !error && document && <div className="pdf-page-list" style={{ width: `${Math.max(100, zoomScale * 100)}%`, transform: pinchZoomScale === null ? undefined : `scale(${pinchZoomScale / zoomScale})`, transformOrigin: pinchOrigin ? `${pinchOrigin.x}px ${pinchOrigin.y}px` : 'top center' }}>{pageSizes.map((size, index) => { const activeHit = activeSearchIndex >= 0 ? searchHits[activeSearchIndex] : null; return <PdfPageView key={index + 1} pdf={document} pageNumber={index + 1} pageSize={size} width={pageWidth} strokes={markup.strokes[index + 1] || []} tool={tool} penColor={penColor} penSize={penSize} mode={viewMode} searchBoxes={activeHit?.pageNumber === index + 1 ? activeHit.boxes : undefined} scrollRoot={scrollRef} onActivate={setActivePage} onDraw={drawPoint} onErase={eraseAt} />; })}</div>}
         </div>
         {notesVisible && <aside className="pdf-notes"><div className="notes-heading"><strong>페이지별 메모</strong><span>{pageNumber}페이지 · 입력 즉시 자동 저장</span></div><textarea value={currentNote} onChange={(event) => setMarkup((current) => ({ ...current, notes: { ...current.notes, [pageNumber]: event.target.value } }))} placeholder="이 페이지의 메모를 적어 보세요…" /><div className="notes-bottom"><span>{currentPageStrokes.length}개 필기 · {screenLocked ? '화면 고정됨' : '세로 스크롤 가능'}</span><button onClick={() => void exportAnnotatedPdf()} disabled={loading || exporting}>{exporting ? 'PDF 만드는 중…' : '필기 포함 PDF 저장'}</button></div></aside>}
       </div>
