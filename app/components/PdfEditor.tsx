@@ -308,10 +308,12 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [zoomScale, setZoomScale] = useState(1);
   const [pinchZoomScale, setPinchZoomScale] = useState<number | null>(null);
   const [pinchOrigin, setPinchOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [zoomControlsOpen, setZoomControlsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const zoomScaleRef = useRef(1);
   const viewModeRef = useRef<ViewMode>('viewer');
   const pinchZoomRef = useRef<number | null>(null);
+  const zoomControlsTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
   const ocrWorkerRef = useRef<OcrWorker | null>(null);
   const searchUnitCacheRef = useRef(new Map<number, SearchUnit[]>());
@@ -319,8 +321,15 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   zoomScaleRef.current = zoomScale;
   viewModeRef.current = viewMode;
 
+  const revealZoomControls = useCallback((duration = 2600) => {
+    setZoomControlsOpen(true);
+    if (zoomControlsTimerRef.current !== null) window.clearTimeout(zoomControlsTimerRef.current);
+    zoomControlsTimerRef.current = window.setTimeout(() => setZoomControlsOpen(false), duration);
+  }, []);
+
   useEffect(() => () => {
     searchRunRef.current += 1;
+    if (zoomControlsTimerRef.current !== null) window.clearTimeout(zoomControlsTimerRef.current);
     if (ocrWorkerRef.current) void ocrWorkerRef.current.terminate();
   }, []);
 
@@ -381,6 +390,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
     const startPinch = (event: TouchEvent) => {
       if (viewModeRef.current !== 'viewer' || event.touches.length < 2) return;
       event.preventDefault();
+      revealZoomControls();
       pinchStart = { distance: Math.max(1, touchDistance(event.touches)), scale: zoomScaleRef.current };
       const pageList = root.querySelector<HTMLElement>('.pdf-page-list');
       if (pageList) {
@@ -395,6 +405,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
     const movePinch = (event: TouchEvent) => {
       if (!pinchStart || event.touches.length < 2) return;
       event.preventDefault();
+      revealZoomControls();
       const nextScale = Math.min(3, Math.max(0.5, pinchStart.scale * touchDistance(event.touches) / pinchStart.distance));
       pinchZoomRef.current = nextScale;
       setPinchZoomScale(nextScale);
@@ -408,6 +419,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       setZoomScale(nextScale);
       setPinchZoomScale(null);
       setPinchOrigin(null);
+      revealZoomControls();
     };
     root.addEventListener('touchstart', startPinch, { passive: false });
     root.addEventListener('touchmove', movePinch, { passive: false });
@@ -419,7 +431,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       root.removeEventListener('touchend', finishPinch);
       root.removeEventListener('touchcancel', finishPinch);
     };
-  }, []);
+  }, [revealZoomControls]);
 
   useEffect(() => {
     if (!loadedRef.current) return;
@@ -708,8 +720,8 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const currentNote = markup.notes[pageNumber] || '';
   const pageWidth = Math.min(viewerWidth, 920) * zoomScale;
   const shownZoomScale = pinchZoomScale ?? zoomScale;
-  const adjustZoom = (amount: number) => setZoomScale((current) => Math.min(3, Math.max(0.5, Math.round((current + amount) * 100) / 100)));
-  const fitPageToScreen = () => { setZoomScale(1); setPinchZoomScale(null); setPinchOrigin(null); scrollRef.current?.scrollTo({ left: 0, behavior: 'smooth' }); };
+  const adjustZoom = (amount: number) => { revealZoomControls(); setZoomScale((current) => Math.min(3, Math.max(0.5, Math.round((current + amount) * 100) / 100))); };
+  const fitPageToScreen = () => { revealZoomControls(); setZoomScale(1); setPinchZoomScale(null); setPinchOrigin(null); scrollRef.current?.scrollTo({ left: 0, behavior: 'smooth' }); };
   const activeInkSize = tool === 'highlighter' ? highlighterSize : penSize;
 
   return <div className="pdf-editor-backdrop">
@@ -737,10 +749,14 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
       <div className={`pdf-main ${notesVisible ? '' : 'notes-hidden'}`}>
         <div className={`pdf-canvas-scroller ${screenLocked ? 'screen-locked' : ''} ${zoomScale > 1 ? 'zoomed' : ''}`} ref={scrollRef}>
           <div className="pdf-zoom-controls" role="group" aria-label="PDF 확대/축소">
-            <button onClick={() => adjustZoom(-0.25)} disabled={loading || zoomScale <= 0.5} aria-label="축소" title="축소">−</button>
-            <span aria-live="polite">{Math.round(shownZoomScale * 100)}%</span>
-            <button onClick={() => adjustZoom(0.25)} disabled={loading || zoomScale >= 3} aria-label="확대" title="확대">+</button>
-            <button className="zoom-fit-button" onClick={fitPageToScreen} disabled={loading || (zoomScale === 1 && pinchZoomScale === null)} aria-label="화면 맞춤">맞춤</button>
+            {zoomControlsOpen ? <>
+              <button onClick={() => adjustZoom(-0.25)} disabled={loading || zoomScale <= 0.5} aria-label="축소" title="축소">−</button>
+              <span aria-live="polite">{Math.round(shownZoomScale * 100)}%</span>
+              <button onClick={() => adjustZoom(0.25)} disabled={loading || zoomScale >= 3} aria-label="확대" title="확대">+</button>
+              <button className="zoom-fit-button" onClick={fitPageToScreen} disabled={loading || (zoomScale === 1 && pinchZoomScale === null)} aria-label="화면 맞춤">맞춤</button>
+            </> : <button className="zoom-level-toggle" onClick={() => revealZoomControls()} aria-label={`확대 도구 열기, 현재 ${Math.round(zoomScale * 100)}%`} aria-expanded={zoomControlsOpen} title="확대/축소 도구">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="6.4" /><path d="m16 16 4.2 4.2M10.8 7.8v6M7.8 10.8h6" /></svg><span>{Math.round(zoomScale * 100)}%</span>
+            </button>}
           </div>
           {loading && <div className="pdf-loading"><span className="spinner" /> PDF 여는 중...</div>}
           {error && <div className="pdf-error">{error}</div>}
