@@ -10,9 +10,11 @@ type Tool = 'pen' | 'eraser' | 'highlighter';
 type EraserMode = 'partial' | 'stroke';
 type ViewMode = 'viewer' | 'write';
 type SearchBox = { left: number; top: number; width: number; height: number };
-type SearchUnit = { text: string; box?: SearchBox };
+type SearchUnit = { text: string; box?: SearchBox; fontFamily?: string; direction?: string };
 type SearchHit = { pageNumber: number; boxes?: SearchBox[]; excerpt: string };
 type OcrWorker = Awaited<ReturnType<typeof import('tesseract.js').createWorker>>;
+
+type SearchCharacterPosition = { character: string; start: number; end: number };
 
 type EditorProps = {
   file: File;
@@ -50,17 +52,40 @@ function normalizeSearchText(text: string) {
 function findSearchHits(units: SearchUnit[], query: string, pageNumber: number): SearchHit[] {
   const normalizedQuery = normalizeSearchText(query).replace(/\s/g, '');
   if (!normalizedQuery) return [];
+  const measureCanvas = window.document.createElement('canvas');
+  const measureContext = measureCanvas.getContext('2d');
   const characters: string[] = [];
   const characterUnits: number[] = [];
   const characterOffsets: number[] = [];
+  const unitPositions: SearchCharacterPosition[][] = [];
+  const unitAdvances: number[] = [];
   units.forEach((unit, unitIndex) => {
-    const normalizedUnit = normalizeSearchText(unit.text).replace(/\s/g, '');
-    for (let offset = 0; offset < normalizedUnit.length; offset += 1) {
-      const character = normalizedUnit[offset];
-      characters.push(character);
-      characterUnits.push(unitIndex);
-      characterOffsets.push(offset);
-    }
+    if (measureContext) measureContext.font = `100px ${unit.fontFamily || 'sans-serif'}`;
+    const originalCharacters = Array.from(unit.text);
+    const individualWidths = originalCharacters.map((character) => measureContext?.measureText(character).width || 1);
+    const rawWidth = individualWidths.reduce((sum, width) => sum + width, 0) || 1;
+    const measuredWidth = measureContext?.measureText(unit.text).width || rawWidth;
+    const widthScale = measuredWidth / rawWidth;
+    const positions: SearchCharacterPosition[] = [];
+    let cursor = 0;
+    originalCharacters.forEach((originalCharacter, originalIndex) => {
+      const advance = individualWidths[originalIndex] * widthScale;
+      const normalizedCharacters = Array.from(originalCharacter.normalize('NFKC').toLocaleLowerCase());
+      if (!/^\s+$/u.test(originalCharacter)) {
+        normalizedCharacters.forEach((character) => {
+          const characterAdvance = advance / Math.max(1, normalizedCharacters.length);
+          positions.push({ character, start: cursor, end: cursor + characterAdvance });
+          characters.push(character);
+          characterUnits.push(unitIndex);
+          characterOffsets.push(positions.length - 1);
+          cursor += characterAdvance;
+        });
+      } else {
+        cursor += advance;
+      }
+    });
+    unitPositions[unitIndex] = positions;
+    unitAdvances[unitIndex] = cursor;
   });
   const searchableText = characters.join('');
   const matches: SearchHit[] = [];
@@ -79,11 +104,16 @@ function findSearchHits(units: SearchUnit[], query: string, pageNumber: number):
     const boxes = [...matchedOffsets.entries()].flatMap(([unitIndex, offsets]) => {
       const unit = units[unitIndex];
       if (!unit.box) return [];
-      const normalizedLength = normalizeSearchText(unit.text).replace(/\s/g, '').length;
       const from = Math.min(...offsets);
-      const to = Math.max(...offsets) + 1;
-      const left = unit.box.left + unit.box.width * from / normalizedLength;
-      return [{ ...unit.box, left, width: unit.box.width * (to - from) / normalizedLength }];
+      const to = Math.max(...offsets);
+      const positions = unitPositions[unitIndex];
+      const totalAdvance = unitAdvances[unitIndex];
+      const startAdvance = positions[from]?.start ?? 0;
+      const endAdvance = positions[to]?.end ?? totalAdvance;
+      const isRtl = unit.direction === 'rtl';
+      const leftAdvance = isRtl ? totalAdvance - endAdvance : startAdvance;
+      const left = unit.box.left + unit.box.width * leftAdvance / totalAdvance;
+      return [{ ...unit.box, left, width: unit.box.width * (endAdvance - startAdvance) / totalAdvance }];
     });
     matches.push({ pageNumber, boxes, excerpt: searchableText.slice(Math.max(0, matchIndex - 18), Math.min(searchableText.length, matchEnd + 18)) });
     fromIndex = matchIndex + 1;
@@ -421,7 +451,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
         const top = Math.max(0, Math.min(first[1], second[1]) / viewport.height);
         const right = Math.min(1, Math.max(first[0], second[0]) / viewport.width);
         const bottom = Math.min(1, Math.max(first[1], second[1]) / viewport.height);
-        return { text: item.str, box: { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) } };
+        return { text: item.str, direction: item.dir, fontFamily: textContent.styles[item.fontName]?.fontFamily, box: { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) } };
       });
     } else {
       const worker = await getOcrWorker();
