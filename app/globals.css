@@ -45,8 +45,10 @@ button{font:inherit;cursor:pointer}
 .write-tools-scroll{grid-column:1/-1;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .write-tools-scroll::-webkit-scrollbar{display:none}
 .write-tools-scroll .ink-tools{width:max-content;min-width:100%;flex-wrap:nowrap;justify-content:flex-start}
+.pen-size-control{height:29px;display:inline-flex;align-items:center;gap:4px;padding:0 3px;color:#667060;font:500 9px 'Noto Sans KR',sans-serif;white-space:nowrap}.pen-size-control input{width:76px;height:18px;margin:0;accent-color:var(--green)}.pen-size-control output{min-width:15px;text-align:right;font:500 9px 'DM Sans',sans-serif;color:#77816f}
 @media(max-width:700px){.pdf-toolbar.write-mode-toolbar{padding:6px 8px;row-gap:5px}.mode-switch button{height:28px;padding:0 8px;font-size:9px}.page-indicator{font-size:9px}.write-tools-scroll .tool-button{height:27px;padding:0 7px}.write-tools-scroll .ink-tools select{max-width:none}}
-@media(max-width:390px){.pdf-toolbar.write-mode-toolbar{padding-left:6px;padding-right:6px}.mode-switch button{padding:0 7px;font-size:8px}.write-tools-scroll .ink-tools{gap:5px}.write-tools-scroll .ink-colors button{width:15px;height:15px}}
+@media(max-width:700px){.pen-size-control{height:27px;font-size:8px}.pen-size-control input{width:64px}}
+@media(max-width:390px){.pdf-toolbar.write-mode-toolbar{padding-left:6px;padding-right:6px}.mode-switch button{padding:0 7px;font-size:8px}.write-tools-scroll .ink-tools{gap:5px}.write-tools-scroll .ink-colors button{width:15px;height:15px}.pen-size-control{gap:3px}.pen-size-control input{width:56px}}
 .toolbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .write-mode-toolbar .toolbar-actions{grid-column:2;grid-row:1}
 .notes-toggle{min-height:28px;padding:0 8px;border:1px solid #e1e4dc;border-radius:5px;background:#fff;color:#64715e;font:500 9px 'Noto Sans KR',sans-serif;white-space:nowrap}

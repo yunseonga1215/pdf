@@ -3,10 +3,11 @@
 import { PointerEvent, RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
-export type InkStroke = { color: string; size: number; opacity?: number; points: Array<[number, number]> };
+export type InkStroke = { color: string; size: number; opacity?: number; penStyle?: PenStyle; points: Array<[number, number]> };
 export type PdfMarkup = { notes: Record<number, string>; strokes: Record<number, InkStroke[]> };
 type PageSize = { width: number; height: number };
 type Tool = 'pen' | 'eraser' | 'highlighter';
+type PenStyle = 'ballpoint' | 'pencil' | 'brush';
 type EraserMode = 'partial' | 'stroke';
 type ViewMode = 'viewer' | 'write';
 type SearchBox = { left: number; top: number; width: number; height: number };
@@ -44,6 +45,31 @@ type PageProps = {
 const blankMarkup = (): PdfMarkup => ({ notes: {}, strokes: {} });
 const INK_COLORS = ['#202820', '#d94f46', '#3367c7', '#e09b23', '#7b4bb5'];
 const HIGHLIGHTER_COLORS = ['#ffe45e', '#ff78a8', '#62b7ff', '#70d99a'];
+
+function drawStrokes(canvas: HTMLCanvasElement, strokes: InkStroke[]) {
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  strokes.forEach((stroke) => {
+    if (!stroke.points.length) return;
+    const style = stroke.penStyle || 'ballpoint';
+    const widthScale = style === 'brush' ? 1.65 : style === 'pencil' ? 0.78 : 1;
+    const defaultOpacity = style === 'pencil' ? 0.62 : style === 'brush' ? 0.86 : 1;
+    context.beginPath();
+    context.globalAlpha = stroke.opacity ?? defaultOpacity;
+    context.strokeStyle = stroke.color;
+    context.fillStyle = stroke.color;
+    context.lineWidth = Math.max(stroke.size * canvas.width * widthScale, 2);
+    const [x, y] = stroke.points[0];
+    context.moveTo(x * canvas.width, y * canvas.height);
+    stroke.points.slice(1).forEach(([pointX, pointY]) => context.lineTo(pointX * canvas.width, pointY * canvas.height));
+    if (stroke.points.length === 1) context.lineTo(x * canvas.width + 0.01, y * canvas.height + 0.01);
+    context.stroke();
+  });
+  context.globalAlpha = 1;
+}
 
 function normalizeSearchText(text: string) {
   return text.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
@@ -203,32 +229,11 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
         if (!context) throw new Error('PDF 페이지를 표시할 캔버스를 만들지 못했어요.');
         task = page.render({ canvas: pdfCanvas, canvasContext: context, viewport, transform: density === 1 ? undefined : [density, 0, 0, density, 0, 0] });
         await task.promise;
-        if (!cancelled) drawInk(inkCanvas, strokes);
+        if (!cancelled) drawStrokes(inkCanvas, strokes);
       } catch (cause) {
         if (!cancelled) console.error(`PDF ${pageNumber} 페이지 렌더링 오류`, cause);
       }
     }
-    const drawInk = (canvas: HTMLCanvasElement, pageStrokes: InkStroke[]) => {
-      const context = canvas.getContext('2d');
-      if (!context) return;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.lineCap = 'round';
-      context.lineJoin = 'round';
-      pageStrokes.forEach((stroke) => {
-        if (!stroke.points.length) return;
-        context.beginPath();
-        context.globalAlpha = stroke.opacity ?? 1;
-        context.strokeStyle = stroke.color;
-        context.fillStyle = stroke.color;
-        context.lineWidth = Math.max(stroke.size * canvas.width, 2);
-        const [x, y] = stroke.points[0];
-        context.moveTo(x * canvas.width, y * canvas.height);
-        stroke.points.slice(1).forEach(([pointX, pointY]) => context.lineTo(pointX * canvas.width, pointY * canvas.height));
-        if (stroke.points.length === 1) context.lineTo(x * canvas.width + 0.01, y * canvas.height + 0.01);
-        context.stroke();
-      });
-      context.globalAlpha = 1;
-    };
     void render();
     return () => {
       cancelled = true;
@@ -241,24 +246,7 @@ function PdfPageView({ pdf, pageNumber, pageSize, width, strokes, tool, penColor
   useEffect(() => {
     if (!nearViewport || !inkCanvasRef.current) return;
     const canvas = inkCanvasRef.current;
-    const context = canvas.getContext('2d');
-    if (!context) return;
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-    strokes.forEach((stroke) => {
-      if (!stroke.points.length) return;
-      context.beginPath();
-      context.globalAlpha = stroke.opacity ?? 1;
-      context.strokeStyle = stroke.color;
-      context.lineWidth = Math.max(stroke.size * canvas.width, 2);
-      const [x, y] = stroke.points[0];
-      context.moveTo(x * canvas.width, y * canvas.height);
-      stroke.points.slice(1).forEach(([pointX, pointY]) => context.lineTo(pointX * canvas.width, pointY * canvas.height));
-      if (stroke.points.length === 1) context.lineTo(x * canvas.width + 0.01, y * canvas.height + 0.01);
-      context.stroke();
-    });
-    context.globalAlpha = 1;
+    drawStrokes(canvas, strokes);
   }, [strokes, nearViewport]);
 
   const pointFor = (event: PointerEvent<HTMLCanvasElement>): [number, number] => {
@@ -298,6 +286,8 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const [penColor, setPenColor] = useState(INK_COLORS[0]);
   const [highlighterColor, setHighlighterColor] = useState(HIGHLIGHTER_COLORS[0]);
   const [penSize, setPenSize] = useState(0.004);
+  const [penStyle, setPenStyle] = useState<PenStyle>('ballpoint');
+  const [highlighterSize, setHighlighterSize] = useState(0.022);
   const [tool, setTool] = useState<Tool>('pen');
   const [eraserMode, setEraserMode] = useState<EraserMode>('partial');
   const [viewMode, setViewMode] = useState<ViewMode>('viewer');
@@ -535,7 +525,7 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const drawPoint = (targetPage: number, point: [number, number], begin: boolean) => {
     setMarkup((current) => {
       const pageStrokes = [...(current.strokes[targetPage] || [])];
-      if (begin) pageStrokes.push({ color: tool === 'highlighter' ? highlighterColor : penColor, size: tool === 'highlighter' ? 0.022 : penSize, opacity: tool === 'highlighter' ? 0.34 : 1, points: [point] });
+      if (begin) pageStrokes.push({ color: tool === 'highlighter' ? highlighterColor : penColor, size: tool === 'highlighter' ? highlighterSize : penSize, opacity: tool === 'highlighter' ? 0.34 : undefined, penStyle: tool === 'pen' ? penStyle : undefined, points: [point] });
       else if (pageStrokes.length) {
         const last = pageStrokes[pageStrokes.length - 1];
         pageStrokes[pageStrokes.length - 1] = { ...last, points: [...last.points, point] };
@@ -661,13 +651,23 @@ export default function PdfEditor({ file, fileId, loadMarkup, saveMarkup, onClos
   const currentPageStrokes = markup.strokes[pageNumber] || [];
   const currentNote = markup.notes[pageNumber] || '';
   const pageWidth = Math.min(viewerWidth, 920);
+  const activeInkSize = tool === 'highlighter' ? highlighterSize : penSize;
 
   return <div className="pdf-editor-backdrop">
     <section className="pdf-editor" role="dialog" aria-modal="true" aria-label={`${file.name} PDF 편집`}>
       <header className="pdf-editor-header"><div className="pdf-title"><strong title={file.name}>{file.name}</strong><span className={`autosave-status ${saveLabel.includes('실패') ? 'save-error' : ''}`}><i />{saveLabel}</span></div><button className="pdf-close" onClick={() => void closeEditor()} aria-label="편집 닫기">×</button></header>
       <div className={`pdf-toolbar ${viewMode === 'write' ? 'write-mode-toolbar' : ''}`}>
         <div className="mode-switch" role="group" aria-label="문서 보기 모드"><button className={viewMode === 'viewer' ? 'mode-selected' : ''} aria-pressed={viewMode === 'viewer'} onClick={() => setViewMode('viewer')}>일반 뷰어</button><button className={viewMode === 'write' ? 'mode-selected' : ''} aria-pressed={viewMode === 'write'} onClick={() => { setViewMode('write'); setTool('pen'); }}>필기 모드</button></div>
-        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools"><button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button><button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button><button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button>{tool === 'eraser' && <select className="eraser-mode-select" value={eraserMode} onChange={(event) => setEraserMode(event.target.value as EraserMode)} aria-label="지우개 방식"><option value="partial">부분 지우개</option><option value="stroke">획 전체 지우개</option></select>}<div className="ink-colors" aria-label={tool === 'highlighter' ? '형광펜 색상' : '펜 색상'}>{(tool === 'highlighter' ? HIGHLIGHTER_COLORS : INK_COLORS).map((color) => { const selected = tool === 'highlighter' ? highlighterColor === color : penColor === color; return <button key={color} aria-label={`${tool === 'highlighter' ? '형광펜' : '펜'} 색상 ${color}`} aria-pressed={selected} className={selected ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { if (tool === 'highlighter') { setHighlighterColor(color); setTool('highlighter'); } else { setPenColor(color); setTool('pen'); } }} />; })}</div><select value={penSize} onChange={(event) => { setPenSize(Number(event.target.value)); setTool('pen'); }} aria-label="펜 두께"><option value={0.0025}>얇게</option><option value={0.004}>보통</option><option value={0.007}>굵게</option></select><button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button></div></div>}
+        {viewMode === 'write' && <div className="write-tools-scroll"><div className="ink-tools">
+          <button className={`tool-button ${tool === 'pen' ? 'tool-active' : ''}`} onClick={() => setTool('pen')} aria-pressed={tool === 'pen'}><span className="pen-symbol">✎</span><span>펜</span></button>
+          <button className={`tool-button ${tool === 'highlighter' ? 'tool-active' : ''}`} onClick={() => setTool('highlighter')} aria-pressed={tool === 'highlighter'}><span className="highlighter-symbol">▰</span><span>형광펜</span></button>
+          <button className={`tool-button eraser-tool ${tool === 'eraser' ? 'tool-active' : ''}`} onClick={() => setTool('eraser')} aria-pressed={tool === 'eraser'}><span>▱</span><span>지우개</span></button>
+          {tool === 'eraser' && <select className="eraser-mode-select" value={eraserMode} onChange={(event) => setEraserMode(event.target.value as EraserMode)} aria-label="지우개 방식"><option value="partial">부분 지우개</option><option value="stroke">획 전체 지우개</option></select>}
+          {tool === 'pen' && <select className="pen-style-select" value={penStyle} onChange={(event) => setPenStyle(event.target.value as PenStyle)} aria-label="펜 종류"><option value="ballpoint">볼펜</option><option value="pencil">연필</option><option value="brush">붓펜</option></select>}
+          <div className="ink-colors" aria-label={tool === 'highlighter' ? '형광펜 색상' : '펜 색상'}>{(tool === 'highlighter' ? HIGHLIGHTER_COLORS : INK_COLORS).map((color) => { const selected = tool === 'highlighter' ? highlighterColor === color : penColor === color; return <button key={color} aria-label={`${tool === 'highlighter' ? '형광펜' : '펜'} 색상 ${color}`} aria-pressed={selected} className={selected ? 'color-selected' : ''} style={{ '--ink-color': color } as React.CSSProperties} onClick={() => { if (tool === 'highlighter') { setHighlighterColor(color); setTool('highlighter'); } else { setPenColor(color); setTool('pen'); } }} />; })}</div>
+          {tool !== 'eraser' && <label className="pen-size-control"><span>굵기</span><input type="range" min={tool === 'highlighter' ? 8 : 1} max={tool === 'highlighter' ? 40 : 16} step="1" value={Math.round(activeInkSize * 1000)} onChange={(event) => { const nextSize = Number(event.target.value) / 1000; if (tool === 'highlighter') setHighlighterSize(nextSize); else setPenSize(nextSize); }} aria-label={`${tool === 'highlighter' ? '형광펜' : '펜'} 굵기`} /><output>{Math.round(activeInkSize * 1000)}</output></label>}
+          <button className={`tool-button screen-lock-button ${screenLocked ? 'tool-active' : ''}`} onClick={() => setScreenLocked((current) => !current)} aria-pressed={screenLocked}><span>{screenLocked ? '🔒' : '🔓'}</span><span>{screenLocked ? '잠금 해제' : '화면 잠금'}</span></button>
+        </div></div>}
         <div className="toolbar-actions"><span className="page-indicator">{pageNumber} / {pageSizes.length || '—'}</span><button className="search-toggle" onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="6.4" /><path d="m16 16 4.2 4.2" /></svg><span>찾기</span></button><button className="notes-toggle" onClick={() => setNotesVisible((visible) => !visible)} aria-expanded={notesVisible}>{notesVisible ? '메모 숨기기' : '메모 보기'}</button></div>
       </div>
       {searchOpen && <div className="pdf-search-bar" role="search">
